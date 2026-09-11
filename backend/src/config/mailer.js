@@ -1,12 +1,6 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendOtpEmail(to, code, fullName) {
   const html = `
@@ -39,12 +33,18 @@ async function sendOtpEmail(to, code, fullName) {
     </div>
   `;
 
-  await transporter.sendMail({
-    from: `"Continental Federal Bank" <${process.env.GMAIL_USER}>`,
+  const result = await resend.emails.send({
+    from: 'Continental Federal Bank <onboarding@resend.dev>',
     to,
     subject: 'Your Continental Federal verification code',
     html,
   });
+
+  if (result.error) {
+    throw new Error('Resend error: ' + result.error.message);
+  }
+
+  return result;
 }
 
 module.exports = { sendOtpEmail };

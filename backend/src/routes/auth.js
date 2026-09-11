@@ -44,18 +44,16 @@ router.post('/login',
     const email = user.email || '';
     const maskedEmail = email.replace(/^(.{2}).*@/, '$1***@');
 
-    try {
-      await sendOtpEmail(email, otp, user.fullName);
-    } catch (mailErr) {
-      console.error('Email send failed:', mailErr.message);
-    }
+    sendOtpEmail(email, otp, user.fullName)
+      .then(() => console.log('[OTP] Sent to ' + email))
+      .catch(err => console.error('[OTP] Email failed:', err.message));
 
     res.json({
       success: true,
       otpRequired: true,
       stageToken,
       destination: maskedEmail,
-      message: `A 6-digit code has been sent to ${maskedEmail}.`,
+      message: 'A 6-digit code has been sent to ' + maskedEmail + '.',
     });
   }
 );
@@ -147,12 +145,9 @@ router.post('/resend-otp', async (req, res) => {
     data: { loginOtp: otp, loginOtpExpiry: expiry }
   });
 
-  try {
-    await sendOtpEmail(user.email, otp, user.fullName);
-  } catch (e) {
-    console.error('Resend failed:', e.message);
-    return res.status(500).json({ error: 'Could not send email. Try again shortly.' });
-  }
+  sendOtpEmail(user.email, otp, user.fullName)
+    .then(() => console.log('[OTP-RESEND] Sent to ' + user.email))
+    .catch(err => console.error('[OTP-RESEND] Failed:', err.message));
 
   res.json({ success: true, message: 'A new code has been sent.' });
 });
