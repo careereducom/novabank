@@ -108,8 +108,10 @@ export default function Transfer() {
             placeholder="Enter 10-digit account number"
           />
           {enquiry && enquiry.resolved && (
-            <div className="mt-2 px-4 py-2.5 rounded-md text-sm font-medium bg-green-50 text-green-700 border border-green-200">
-              ✓ {enquiry.accountName}
+            <div className="mt-2 px-4 py-3 rounded-md bg-green-50 border border-green-200">
+              <p className="text-sm font-bold text-green-800">✓ {enquiry.accountName}</p>
+              <p className="text-xs text-green-700 mt-0.5">{enquiry.bankName}</p>
+              <p className="text-xs text-green-600 font-mono mt-0.5">{enquiry.accountNumber}</p>
             </div>
           )}
         </div>
@@ -146,9 +148,15 @@ export default function Transfer() {
               Confirm this transfer with your 4-digit code
             </p>
 
-            <div className="text-center font-serif text-3xl font-bold text-[#0f2b5b] mb-6">
+            <div className="text-center font-serif text-3xl font-bold text-[#0f2b5b] mb-2">
               {money(amount)}
             </div>
+            {enquiry && enquiry.resolved && (
+              <div className="text-center text-xs text-gray-500 mb-5">
+                To <strong>{enquiry.accountName}</strong><br/>
+                <span className="text-gray-400">{enquiry.bankName}</span>
+              </div>
+            )}
 
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm mb-4">

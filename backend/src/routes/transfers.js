@@ -16,12 +16,49 @@ const EXTERNAL_NAMES = [
   'LUKAS MULLER', 'ANNA SCHMIDT', 'CARLOS FERNANDEZ', 'ELENA MORENO',
 ];
 
-function resolveExternalName(accountNumber) {
+const EXTERNAL_BANKS = [
+  'Chase Bank, New York, NY',
+  'Bank of America, Charlotte, NC',
+  'Wells Fargo, San Francisco, CA',
+  'Citibank, New York, NY',
+  'Capital One, McLean, VA',
+  'US Bank, Minneapolis, MN',
+  'PNC Bank, Pittsburgh, PA',
+  'TD Bank, Cherry Hill, NJ',
+  'HSBC USA, New York, NY',
+  'Fifth Third Bank, Cincinnati, OH',
+  'Royal Bank of Canada, Toronto',
+  'TD Canada Trust, Toronto',
+  'Scotiabank, Toronto',
+  'Bank of Montreal, Toronto',
+  'CIBC, Toronto',
+  'National Bank of Canada, Montreal',
+  'BBVA Mexico, Mexico City',
+  'Banorte, Monterrey',
+  'Santander Mexico, Mexico City',
+  'Citibanamex, Mexico City',
+  'HSBC UK, London',
+  'Barclays, London',
+  'Deutsche Bank, Frankfurt',
+  'BNP Paribas, Paris',
+  'Banco Santander, Madrid',
+  'UBS AG, Zurich',
+];
+
+function hashNumber(accountNumber) {
   let hash = 0;
   for (let i = 0; i < accountNumber.length; i++) {
     hash = (hash * 31 + accountNumber.charCodeAt(i)) >>> 0;
   }
-  return EXTERNAL_NAMES[hash % EXTERNAL_NAMES.length];
+  return hash;
+}
+
+function resolveExternalName(accountNumber) {
+  return EXTERNAL_NAMES[hashNumber(accountNumber) % EXTERNAL_NAMES.length];
+}
+
+function resolveExternalBank(accountNumber) {
+  return EXTERNAL_BANKS[hashNumber(accountNumber) % EXTERNAL_BANKS.length];
 }
 
 router.post('/', auth, async (req, res) => {
@@ -58,6 +95,10 @@ router.post('/', auth, async (req, res) => {
     let recipientName = recipient ? recipient.accountName : null;
     if (!recipientName) recipientName = resolveExternalName(toAccountNumber);
 
+    let recipientBank = isInternal
+      ? 'Continental Federal Bank & Trust'
+      : resolveExternalBank(toAccountNumber);
+
     const result = await prisma.$transaction(async (tx) => {
       const updatedSender = await tx.account.update({
         where: { id: sender.id },
@@ -80,7 +121,7 @@ router.post('/', auth, async (req, res) => {
           category: isInternal ? 'INTERNAL' : 'INTERBANK',
           description: isInternal
             ? 'Transfer to ' + recipientName
-            : 'Inter-bank transfer to ' + recipientName,
+            : 'Inter-bank transfer to ' + recipientName + ' at ' + recipientBank,
           balanceAfter: updatedSender.balance,
           note,
           fromAccountId: sender.id,
@@ -96,8 +137,16 @@ router.post('/', auth, async (req, res) => {
         reference: result.reference,
         date: result.createdAt,
         status: result.status,
-        from: { name: sender.accountName, account: sender.accountNumber },
-        to:   { name: recipientName,       account: toAccountNumber },
+        from: {
+          name: sender.accountName,
+          account: sender.accountNumber,
+          bank: 'Continental Federal Bank & Trust'
+        },
+        to: {
+          name: recipientName,
+          account: toAccountNumber,
+          bank: recipientBank
+        },
         amount: Number(amount),
         balanceAfter: Number(result.balanceAfter),
         note: result.note
