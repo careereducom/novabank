@@ -16,10 +16,12 @@ Status    : ${displayStatus}
 FROM
 Name      : ${receipt.from.name}
 Account   : ${receipt.from.account}
+Bank      : ${receipt.from.bank || 'Continental Federal Bank & Trust'}
 
 TO
 Name      : ${receipt.to.name}
 Account   : ${receipt.to.account}
+Bank      : ${receipt.to.bank || 'Beneficiary Bank'}
 
 ────────────────────────────
 AMOUNT    : ${money(receipt.amount)}
