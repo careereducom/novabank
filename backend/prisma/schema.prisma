@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  username      String    @unique
+  passwordHash  String
+  fullName      String
+  email         String    @unique
+  phone         String?
+  isAdmin       Boolean   @default(false)
+  kycStatus     String    @default("PENDING")
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  state         String?
+  postalCode    String?
+  country       String?   @default("United States")
+  dateOfBirth   DateTime?
+  ssnLast4      String?
+  createdAt     DateTime  @default(now())
+
+  accounts      Account[]
+  transactions  Transaction[]
+  cards         Card[]
+  billPayments  BillPayment[]
+  deposits      Deposit[]
+  auditLogs     AuditLog[]
+}
+
+model Account {
+  id             String    @id @default(uuid())
+  accountNumber  String    @unique
+  accountName    String
+  balance        Decimal   @default(0) @db.Decimal(15, 2)
+  accountType    String    @default("checking")
+  isBusiness     Boolean   @default(false)
+  isRegistered   Boolean   @default(true)
+  transferCode   String
+  openedAt       DateTime  @default(now())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  createdAt      DateTime  @default(now())
+
+  sentTxns       Transaction[] @relation("Sender")
+  receivedTxns   Transaction[] @relation("Receiver")
+  cards          Card[]
+}
+
+model Transaction {
+  id              String    @id @default(uuid())
+  reference       String    @unique
+  amount          Decimal   @db.Decimal(15, 2)
+  status          String
+  type            String    @default("TRANSFER")
+  category        String?
+  description     String?
+  balanceAfter    Decimal?  @db.Decimal(15, 2)
+  note            String?
+  fromAccountId   String?
+  toAccountId     String?
+  fromAccount     Account?  @relation("Sender",   fields: [fromAccountId], references: [id])
+  toAccount       Account?  @relation("Receiver", fields: [toAccountId],   references: [id])
+  initiatedBy     String?
+  user            User?     @relation(fields: [initiatedBy], references: [id])
+  createdAt       DateTime  @default(now())
+  resolvedAt      DateTime?
+  resolvedBy      String?
+}
+
+model Card {
+  id                String    @id @default(uuid())
+  cardNumber        String    @unique
+  last4             String    @default("")
+  brand             String    @default("VISA")
+  type              String
+  status            String    @default("ACTIVE")
+  expiryMonth       Int
+  expiryYear        Int
+  cvv               String
+  holderName        String
+  accountId         String
+  userId            String
+  account           Account   @relation(fields: [accountId], references: [id])
+  user              User      @relation(fields: [userId],    references: [id])
+  shippingLine1     String?
+  shippingLine2     String?
+  shippingCity      String?
+  shippingState     String?
+  shippingZip       String?
+  shippingCountry   String?
+  trackingNumber    String?
+  carrier           String?
+  orderedAt         DateTime  @default(now())
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
+  estimatedDelivery DateTime?
+  createdAt         DateTime  @default(now())
+}
+
+model BillPayment {
+  id          String    @id @default(uuid())
+  reference   String    @unique
+  biller      String
+  customerId  String
+  amount      Decimal   @db.Decimal(15, 2)
+  status      String    @default("SUCCESS")
+  accountId   String
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  createdAt   DateTime  @default(now())
+}
+
+model Deposit {
+  id            String    @id @default(uuid())
+  reference     String    @unique
+  amount        Decimal   @db.Decimal(15, 2)
+  checkImage    String
+  status        String    @default("PENDING")
+  accountId     String
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  createdAt     DateTime  @default(now())
+  resolvedAt    DateTime?
+}
+
+model AuditLog {
+  id         String    @id @default(uuid())
+  action     String
+  userId     String?
+  ip         String?
+  ua         String?
+  path       String
+  success    Boolean
+  detail     String?
+  createdAt  DateTime  @default(now())
+  user       User?     @relation(fields: [userId], references: [id])
+}

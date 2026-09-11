@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --cfb-navy:   #0f2b5b;
+  --cfb-navy-2: #0a2148;
+  --cfb-red:    #b1122b;
+  --cfb-gold:   #c9a227;
+  --cfb-ink:    #111827;
+  --cfb-line:   #e5e7eb;
+  --cfb-bg:     #f4f6fa;
+}
+
+html, body, #root { height: 100%; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--cfb-bg);
+  color: var(--cfb-ink);
+  -webkit-font-smoothing: antialiased;
+}
+.font-serif { font-family: 'Playfair Display', Georgia, serif; }
+.btn-primary { background: var(--cfb-navy); color: #fff; font-weight: 600; padding: 14px 24px; border-radius: 6px; transition: .15s; }
+.btn-primary:hover { background: var(--cfb-navy-2); }
+.btn-primary:disabled { opacity: .55; cursor: not-allowed; }
+.btn-red { background: var(--cfb-red); color: #fff; font-weight: 600; padding: 14px 24px; border-radius: 6px; transition: .15s; }
+.btn-red:hover { background: #8c0d21; }
+.field { width: 100%; padding: 13px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 15px; background: #fff; transition: .15s; }
+.field:focus { outline: none; border-color: var(--cfb-navy); box-shadow: 0 0 0 3px rgba(15,43,91,.12); }
+.card { background: #fff; border: 1px solid var(--cfb-line); border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+.divider { height: 1px; background: var(--cfb-line); }

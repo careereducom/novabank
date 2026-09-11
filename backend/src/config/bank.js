@@ -1,0 +1,17 @@
+module.exports = {
+  legalName:     'Continental Federal Bank & Trust',
+  shortName:     'CFB',
+  founded:       1989,
+  fdicCert:      'Cert #33187',
+  nmlsId:        '447182',
+  swift:         'CBFBUS33',
+  routingNumber: '021000089',
+  hqAddress:     '245 Park Avenue, New York, NY 10167',
+  totalCustomers:'1,247,318',
+  totalDeposits: 87_342_918.47,
+  totalBranches: 214,
+  totalAtms:     48_500,
+  countriesServed: ['United States', 'Canada', 'Mexico'],
+  supportPhone:  '1-800-CFB-BANK',
+  supportEmail:  'support@cfbank.com',
+};
