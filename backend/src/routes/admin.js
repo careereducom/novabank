@@ -2,6 +2,7 @@ const router = require('express').Router();
 const auth = require('../middleware/auth');
 const adminOnly = require('../middleware/admin');
 const prisma = require('../config/db');
+const clientCredentials = require('../config/clientCredentials');
 
 router.get('/pending', auth, adminOnly, async (req, res) => {
   const txns = await prisma.transaction.findMany({
@@ -33,7 +34,7 @@ router.get('/credentials', auth, adminOnly, async (req, res) => {
     balance:       Number(a.balance),
     transferCode:  a.transferCode,
     username:      a.user.username,
-    password:      'password123',
+    password:      clientCredentials[a.user.username] || '—',
     email:         a.user.email
   })));
 });
