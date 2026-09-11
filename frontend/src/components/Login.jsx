@@ -1,17 +1,27 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../api';
 
 export default function Login() {
+  const [step, setStep] = useState('credentials');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
+
+  const [stageToken, setStageToken] = useState('');
+  const [destination, setDestination] = useState('');
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const inputs = useRef([]);
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (step === 'otp' && inputs.current[0]) inputs.current[0].focus();
+  }, [step]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -21,13 +31,78 @@ export default function Login() {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
-      login(data.token, data.user, data.accounts);
-      navigate('/dashboard');
+
+      if (data.otpRequired) {
+        setStageToken(data.stageToken);
+        setDestination(data.destination);
+        setStep('otp');
+      }
     } catch (err) {
       setError(err.message || 'Unable to sign in. Please try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleOtpChange = (idx, val) => {
+    const v = val.replace(/\D/g, '').slice(0, 1);
+    const next = [...otp];
+    next[idx] = v;
+    setOtp(next);
+    if (v && idx < 5) inputs.current[idx + 1]?.focus();
+  };
+
+  const handleOtpKey = (idx, e) => {
+    if (e.key === 'Backspace' && !otp[idx] && idx > 0) {
+      inputs.current[idx - 1]?.focus();
+    }
+  };
+
+  const handlePaste = (e) => {
+    const pasted = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
+    if (pasted) {
+      setOtp(pasted.split('').concat(['','','','','']).slice(0,6));
+      inputs.current[5]?.focus();
+    }
+  };
+
+  const verifyOtp = async () => {
+    const code = otp.join('');
+    if (code.length !== 6) return setError('Enter the 6-digit code');
+    setError(''); setLoading(true);
+    try {
+      const data = await apiFetch('/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ stageToken, code })
+      });
+      login(data.token, data.user, data.accounts);
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err.message || 'Verification failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendOtp = async () => {
+    setError('');
+    try {
+      await apiFetch('/auth/resend-otp', {
+        method: 'POST',
+        body: JSON.stringify({ stageToken })
+      });
+      setOtp(['','','','','','']);
+      inputs.current[0]?.focus();
+    } catch (err) {
+      setError(err.message || 'Could not resend code');
+    }
+  };
+
+  const backToCredentials = () => {
+    setStep('credentials');
+    setOtp(['','','','','','']);
+    setStageToken('');
+    setError('');
   };
 
   const testimonials = [
@@ -53,7 +128,6 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
-      {/* HEADER */}
       <header className="bg-[#0f2b5b] text-white sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -77,10 +151,8 @@ export default function Login() {
         </div>
       </header>
 
-      {/* HERO */}
       <section className="relative bg-gradient-to-br from-[#0f2b5b] via-[#0a2148] to-[#0f2b5b] overflow-hidden">
         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-12 items-center py-16">
-          {/* Left — Marketing */}
           <div className="text-white">
             <p className="text-[#c9a227] text-xs font-bold tracking-[.3em] mb-5">
               SERVING CLIENTS SINCE 1989
@@ -119,7 +191,6 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Right — Hero Image */}
           <div className="relative hidden md:block">
             <div className="rounded-2xl overflow-hidden shadow-2xl border-4 border-white/10">
               <img
@@ -141,7 +212,6 @@ export default function Login() {
         </div>
       </section>
 
-      {/* TRUST BAR */}
       <section className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
           {[
@@ -159,12 +229,17 @@ export default function Login() {
         </div>
       </section>
 
-      {/* SIGN-IN SECTION */}
       <section id="signin" className="bg-[#f4f6fa] py-16">
         <div className="max-w-md mx-auto px-6">
           <div className="text-center mb-6">
-            <h2 className="font-serif text-3xl text-[#0f2b5b] mb-2">Welcome back</h2>
-            <p className="text-gray-500 text-sm">Sign in to access your accounts</p>
+            <h2 className="font-serif text-3xl text-[#0f2b5b] mb-2">
+              {step === 'credentials' ? 'Welcome back' : 'Verify your identity'}
+            </h2>
+            <p className="text-gray-500 text-sm">
+              {step === 'credentials'
+                ? 'Sign in to access your accounts'
+                : 'Enter the verification code sent to your registered device'}
+            </p>
           </div>
 
           <div className="card p-8 bg-white">
@@ -174,68 +249,119 @@ export default function Login() {
               </div>
             )}
 
-            <form onSubmit={submit} className="space-y-5" autoComplete="off">
-              <div>
-                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
-                  Username
-                </label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={e => setUsername(e.target.value)}
-                  className="field"
-                  placeholder="Enter your account number"
-                  autoComplete="username"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
-                  Password
-                </label>
-                <div className="relative">
+            {step === 'credentials' && (
+              <form onSubmit={submit} className="space-y-5" autoComplete="off">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
+                    Username
+                  </label>
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    className="field pr-12"
-                    placeholder="Enter password"
-                    autoComplete="current-password"
+                    type="text"
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    className="field"
+                    placeholder="Enter your account number"
+                    autoComplete="username"
                     required
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0f2b5b] text-sm font-semibold">
-                    {showPassword ? 'Hide' : 'Show'}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      className="field pr-12"
+                      placeholder="Enter password"
+                      autoComplete="current-password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0f2b5b] text-sm font-semibold">
+                      {showPassword ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-sm">
+                  <label className="flex items-center gap-2 text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={remember}
+                      onChange={e => setRemember(e.target.checked)}
+                      className="w-4 h-4 accent-[#0f2b5b]"
+                    />
+                    Remember username
+                  </label>
+                  <a href="#" className="text-[#0f2b5b] font-semibold hover:underline">
+                    Forgot password?
+                  </a>
+                </div>
+
+                <button type="submit" disabled={loading} className="btn-primary w-full">
+                  {loading ? 'Verifying…' : 'Sign In'}
+                </button>
+
+                <div className="text-center text-xs text-gray-400 pt-1">
+                  🔒 Secured with 256-bit encryption
+                </div>
+              </form>
+            )}
+
+            {step === 'otp' && (
+              <div className="space-y-5">
+                <div className="bg-blue-50 border border-blue-200 rounded-md p-4 text-sm">
+                  <p className="text-blue-900 font-bold mb-1">🔐 Two-Factor Authentication</p>
+                  <p className="text-blue-800 text-xs">
+                    A 6-digit code has been sent to <strong>{destination}</strong>.
+                    It expires in 5 minutes.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-3 text-center">
+                    Enter verification code
+                  </label>
+                  <div className="flex gap-2 justify-center" onPaste={handlePaste}>
+                    {otp.map((digit, idx) => (
+                      <input
+                        key={idx}
+                        ref={el => inputs.current[idx] = el}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        value={digit}
+                        onChange={e => handleOtpChange(idx, e.target.value)}
+                        onKeyDown={e => handleOtpKey(idx, e)}
+                        className="w-12 h-14 text-center text-2xl font-bold border border-gray-300 rounded-md focus:border-[#0f2b5b] focus:ring-2 focus:ring-[#0f2b5b]/20 outline-none"
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={verifyOtp}
+                  disabled={loading || otp.join('').length !== 6}
+                  className="btn-primary w-full disabled:opacity-50">
+                  {loading ? 'Verifying…' : 'Verify & Sign In'}
+                </button>
+
+                <div className="flex justify-between text-xs text-gray-500">
+                  <button onClick={backToCredentials} className="hover:text-[#0f2b5b] font-semibold">
+                    ← Back
+                  </button>
+                  <button onClick={resendOtp} className="hover:text-[#0f2b5b] font-semibold">
+                    Resend code
                   </button>
                 </div>
               </div>
-
-              <div className="flex items-center justify-between text-sm">
-                <label className="flex items-center gap-2 text-gray-600 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={e => setRemember(e.target.checked)}
-                    className="w-4 h-4 accent-[#0f2b5b]"
-                  />
-                  Remember username
-                </label>
-                <a href="#" className="text-[#0f2b5b] font-semibold hover:underline">
-                  Forgot password?
-                </a>
-              </div>
-
-              <button type="submit" disabled={loading} className="btn-primary w-full">
-                {loading ? 'Signing in…' : 'Sign In'}
-              </button>
-
-              <div className="text-center text-xs text-gray-400 pt-1">
-                🔒 Secured with 256-bit encryption
-              </div>
-            </form>
+            )}
 
             <div className="mt-6 pt-6 border-t border-gray-100 text-center">
               <p className="text-sm text-gray-600 mb-3">New to Continental Federal?</p>
@@ -248,7 +374,6 @@ export default function Login() {
         </div>
       </section>
 
-      {/* TESTIMONIALS */}
       <section className="bg-white py-16">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-12">
@@ -267,11 +392,7 @@ export default function Login() {
                   "{t.quote}"
                 </p>
                 <div className="flex items-center gap-3 pt-5 border-t border-gray-100">
-                  <img
-                    src={t.photo}
-                    alt={t.name}
-                    className="w-12 h-12 rounded-full object-cover"
-                  />
+                  <img src={t.photo} alt={t.name} className="w-12 h-12 rounded-full object-cover" />
                   <div>
                     <p className="font-bold text-[#0f2b5b] text-sm">{t.name}</p>
                     <p className="text-xs text-gray-500">{t.role}</p>
@@ -283,7 +404,6 @@ export default function Login() {
         </div>
       </section>
 
-      {/* CTA BANNER */}
       <section className="bg-gradient-to-br from-[#0f2b5b] to-[#0a2148] text-white py-16">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2 className="font-serif text-4xl mb-4">Ready to get started?</h2>
@@ -297,7 +417,6 @@ export default function Login() {
         </div>
       </section>
 
-      {/* FOOTER */}
       <footer className="bg-[#0a1a3a] text-blue-200 py-10 text-sm">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-6">

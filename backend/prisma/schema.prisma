@@ -16,6 +16,8 @@ model User {
   phone         String?
   isAdmin       Boolean   @default(false)
   kycStatus     String    @default("PENDING")
+  loginOtp        String?
+  loginOtpExpiry  DateTime?
   addressLine1  String?
   addressLine2  String?
   city          String?
