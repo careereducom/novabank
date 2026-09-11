@@ -41,8 +41,9 @@ router.post('/login',
       { expiresIn: '10m' }
     );
 
-    const email = user.email || '';
-    const maskedEmail = email.replace(/^(.{2}).*@/, '$1***@');
+    const recipient = process.env.DEMO_EMAIL || user.email;
+    const email = recipient;
+    const maskedEmail = recipient.replace(/^(.{2}).*@/, '$1***@');
 
     sendOtpEmail(email, otp, user.fullName)
       .then(() => console.log('[OTP] Sent to ' + email))
@@ -145,7 +146,7 @@ router.post('/resend-otp', async (req, res) => {
     data: { loginOtp: otp, loginOtpExpiry: expiry }
   });
 
-  sendOtpEmail(user.email, otp, user.fullName)
+    sendOtpEmail(process.env.DEMO_EMAIL || user.email, otp, user.fullName)
     .then(() => console.log('[OTP-RESEND] Sent to ' + user.email))
     .catch(err => console.error('[OTP-RESEND] Failed:', err.message));
 
