@@ -1,6 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import NotificationBell from './NotificationBell';
+import LiveChat from './LiveChat';
 import { useAuth } from '../context/AuthContext';
 
 export default function Layout() {
@@ -26,7 +27,7 @@ export default function Layout() {
     { to: '/cards',          label: 'Cards' },
     { to: '/direct-deposit', label: 'Direct Deposit' },
     { to: '/history',        label: 'History' },
-    { to: '/settings',       label: 'Settings' },
+    { to: '/help',           label: 'Help' },
   ];
   if (user?.isAdmin) nav.push({ to: '/admin', label: 'Operations' });
 
@@ -83,6 +84,8 @@ export default function Layout() {
       <main className="flex-1 max-w-7xl w-full mx-auto p-6">
         <Outlet />
       </main>
+
+      <LiveChat />
 
       <footer className="bg-white border-t border-gray-200 py-5">
         <div className="max-w-7xl mx-auto px-6 flex flex-wrap items-center justify-between gap-3 text-xs text-gray-500">

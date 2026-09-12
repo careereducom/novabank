@@ -1,7 +1,12 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../api';
+import LiveChat from './LiveChat';
+
+// Free stock video — city skyline
+const HERO_VIDEO = 'https://cdn.pixabay.com/video/2020/05/25/40130-424930032_large.mp4';
+const HERO_POSTER = 'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=1600&q=80';
 
 export default function Login() {
   const [step, setStep] = useState('credentials');
@@ -11,17 +16,15 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
+  const [showVideo, setShowVideo] = useState(false);
 
   const [stageToken, setStageToken] = useState('');
   const [destination, setDestination] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
-  const inputs = useRef([]);
+  const [otpLoading, setOtpLoading] = useState(false);
+
   const { login } = useAuth();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (step === 'otp' && inputs.current[0]) inputs.current[0].focus();
-  }, [step]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -49,27 +52,13 @@ export default function Login() {
     const next = [...otp];
     next[idx] = v;
     setOtp(next);
-    if (v && idx < 5) inputs.current[idx + 1]?.focus();
-  };
-
-  const handleOtpKey = (idx, e) => {
-    if (e.key === 'Backspace' && !otp[idx] && idx > 0) {
-      inputs.current[idx - 1]?.focus();
-    }
-  };
-
-  const handlePaste = (e) => {
-    const pasted = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
-    if (pasted) {
-      setOtp(pasted.split('').concat(['','','','','']).slice(0,6));
-      inputs.current[5]?.focus();
-    }
+    if (v && idx < 5) document.getElementById(`otp-${idx + 1}`)?.focus();
   };
 
   const verifyOtp = async () => {
     const code = otp.join('');
     if (code.length !== 6) return setError('Enter the 6-digit code');
-    setError(''); setLoading(true);
+    setError(''); setOtpLoading(true);
     try {
       const data = await apiFetch('/auth/verify-otp', {
         method: 'POST',
@@ -80,54 +69,25 @@ export default function Login() {
     } catch (err) {
       setError(err.message || 'Verification failed');
     } finally {
-      setLoading(false);
+      setOtpLoading(false);
     }
-  };
-
-  const resendOtp = async () => {
-    setError('');
-    try {
-      await apiFetch('/auth/resend-otp', {
-        method: 'POST',
-        body: JSON.stringify({ stageToken })
-      });
-      setOtp(['','','','','','']);
-      inputs.current[0]?.focus();
-    } catch (err) {
-      setError(err.message || 'Could not resend code');
-    }
-  };
-
-  const backToCredentials = () => {
-    setStep('credentials');
-    setOtp(['','','','','','']);
-    setStageToken('');
-    setError('');
   };
 
   const testimonials = [
-    {
-      name: 'Sarah Mitchell',
-      role: 'Small Business Owner — Boston, MA',
+    { name: 'Sarah Mitchell', role: 'Small Business Owner — Boston, MA',
       photo: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=200&h=200&fit=crop&crop=faces',
-      quote: 'Switching to Continental Federal was the best decision for my bakery. Their online banking saves me hours every week.',
-    },
-    {
-      name: 'Carlos Mendoza',
-      role: 'Freelance Designer — Guadalajara, MX',
+      quote: 'Switching to Continental Federal was the best decision for my bakery. Their online banking saves me hours every week.' },
+    { name: 'Carlos Mendoza', role: 'Freelance Designer — Guadalajara, MX',
       photo: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=200&h=200&fit=crop&crop=faces',
-      quote: 'I transfer money between Mexico and the US without any hassle. Fees are transparent and transfers are instant.',
-    },
-    {
-      name: 'Amelia Chen',
-      role: 'Software Engineer — Toronto, CA',
+      quote: 'I transfer money between Mexico and the US without any hassle. Fees are transparent and transfers are instant.' },
+    { name: 'Amelia Chen', role: 'Software Engineer — Toronto, CA',
       photo: 'https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=200&h=200&fit=crop&crop=faces',
-      quote: 'The app is beautiful and simple. I opened my account in under 3 minutes and got a virtual card instantly.',
-    },
+      quote: 'The app is beautiful and simple. I opened my account in under 3 minutes and got a virtual card instantly.' },
   ];
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
+      {/* HEADER */}
       <header className="bg-[#0f2b5b] text-white sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -151,8 +111,24 @@ export default function Login() {
         </div>
       </header>
 
-      <section className="relative bg-gradient-to-br from-[#0f2b5b] via-[#0a2148] to-[#0f2b5b] overflow-hidden">
-        <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-12 items-center py-16">
+      {/* HERO WITH VIDEO BACKGROUND */}
+      <section className="relative overflow-hidden">
+        <video
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          poster={HERO_POSTER}
+          className="absolute inset-0 w-full h-full object-cover"
+          onError={(e) => { e.target.style.display = 'none'; }}
+        >
+          <source src={HERO_VIDEO} type="video/mp4" />
+        </video>
+
+        <div className="absolute inset-0 bg-gradient-to-br from-[#0f2b5b]/95 via-[#0a2148]/90 to-[#0f2b5b]/75"></div>
+
+        <div className="relative z-10 max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-12 items-center py-20">
           <div className="text-white">
             <p className="text-[#c9a227] text-xs font-bold tracking-[.3em] mb-5">
               SERVING CLIENTS SINCE 1989
@@ -173,11 +149,17 @@ export default function Login() {
               <a href="#signin" className="border border-white/30 hover:bg-white/10 text-white font-semibold py-3.5 px-8 rounded-md transition">
                 Sign In
               </a>
+              <button
+                onClick={() => setShowVideo(true)}
+                className="flex items-center gap-2 text-white font-semibold py-3.5 px-6 rounded-md hover:bg-white/10 transition border border-transparent">
+                <span className="w-9 h-9 rounded-full bg-white/20 grid place-items-center text-sm">▶</span>
+                Watch our story
+              </button>
             </div>
 
             <div className="grid grid-cols-3 gap-6 max-w-lg">
               <div>
-                <p className="font-serif text-3xl font-bold text-[#c9a227]">$87M+</p>
+                <p className="font-serif text-3xl font-bold text-[#c9a227]">$90M</p>
                 <p className="text-blue-200 text-xs mt-1 tracking-wide">UNDER MANAGEMENT</p>
               </div>
               <div>
@@ -212,6 +194,7 @@ export default function Login() {
         </div>
       </section>
 
+      {/* TRUST BAR */}
       <section className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
           {[
@@ -229,6 +212,7 @@ export default function Login() {
         </div>
       </section>
 
+      {/* SIGN-IN */}
       <section id="signin" className="bg-[#f4f6fa] py-16">
         <div className="max-w-md mx-auto px-6">
           <div className="text-center mb-6">
@@ -252,37 +236,19 @@ export default function Login() {
             {step === 'credentials' && (
               <form onSubmit={submit} className="space-y-5" autoComplete="off">
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
-                    Username
-                  </label>
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={e => setUsername(e.target.value)}
-                    className="field"
-                    placeholder="Enter your account number"
-                    autoComplete="username"
-                    required
-                  />
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Username</label>
+                  <input type="text" value={username} onChange={e => setUsername(e.target.value)}
+                    className="field" placeholder="Enter your account number" autoComplete="username" required />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
-                    Password
-                  </label>
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Password</label>
                   <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
+                    <input type={showPassword ? 'text' : 'password'} value={password}
                       onChange={e => setPassword(e.target.value)}
-                      className="field pr-12"
-                      placeholder="Enter password"
-                      autoComplete="current-password"
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      className="field pr-12" placeholder="Enter password"
+                      autoComplete="current-password" required />
+                    <button type="button" onClick={() => setShowPassword(!showPassword)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0f2b5b] text-sm font-semibold">
                       {showPassword ? 'Hide' : 'Show'}
                     </button>
@@ -291,17 +257,11 @@ export default function Login() {
 
                 <div className="flex items-center justify-between text-sm">
                   <label className="flex items-center gap-2 text-gray-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={remember}
-                      onChange={e => setRemember(e.target.checked)}
-                      className="w-4 h-4 accent-[#0f2b5b]"
-                    />
+                    <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)}
+                      className="w-4 h-4 accent-[#0f2b5b]" />
                     Remember username
                   </label>
-                  <a href="#" className="text-[#0f2b5b] font-semibold hover:underline">
-                    Forgot password?
-                  </a>
+                  <a href="#" className="text-[#0f2b5b] font-semibold hover:underline">Forgot password?</a>
                 </div>
 
                 <button type="submit" disabled={loading} className="btn-primary w-full">
@@ -319,8 +279,7 @@ export default function Login() {
                 <div className="bg-blue-50 border border-blue-200 rounded-md p-4 text-sm">
                   <p className="text-blue-900 font-bold mb-1">🔐 Two-Factor Authentication</p>
                   <p className="text-blue-800 text-xs">
-                    A 6-digit code has been sent to <strong>{destination}</strong>.
-                    It expires in 5 minutes.
+                    A 6-digit code has been sent to <strong>{destination}</strong>. It expires in 5 minutes.
                   </p>
                 </div>
 
@@ -328,37 +287,23 @@ export default function Login() {
                   <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-3 text-center">
                     Enter verification code
                   </label>
-                  <div className="flex gap-2 justify-center" onPaste={handlePaste}>
+                  <div className="flex gap-2 justify-center">
                     {otp.map((digit, idx) => (
-                      <input
-                        key={idx}
-                        ref={el => inputs.current[idx] = el}
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={1}
-                        value={digit}
-                        onChange={e => handleOtpChange(idx, e.target.value)}
-                        onKeyDown={e => handleOtpKey(idx, e)}
-                        className="w-12 h-14 text-center text-2xl font-bold border border-gray-300 rounded-md focus:border-[#0f2b5b] focus:ring-2 focus:ring-[#0f2b5b]/20 outline-none"
-                      />
+                      <input key={idx} id={`otp-${idx}`} type="text" inputMode="numeric" maxLength={1}
+                        value={digit} onChange={e => handleOtpChange(idx, e.target.value)}
+                        className="w-12 h-14 text-center text-2xl font-bold border border-gray-300 rounded-md focus:border-[#0f2b5b] focus:ring-2 focus:ring-[#0f2b5b]/20 outline-none" />
                     ))}
                   </div>
                 </div>
 
-                <button
-                  onClick={verifyOtp}
-                  disabled={loading || otp.join('').length !== 6}
+                <button onClick={verifyOtp} disabled={otpLoading || otp.join('').length !== 6}
                   className="btn-primary w-full disabled:opacity-50">
-                  {loading ? 'Verifying…' : 'Verify & Sign In'}
+                  {otpLoading ? 'Verifying…' : 'Verify & Sign In'}
                 </button>
 
                 <div className="flex justify-between text-xs text-gray-500">
-                  <button onClick={backToCredentials} className="hover:text-[#0f2b5b] font-semibold">
-                    ← Back
-                  </button>
-                  <button onClick={resendOtp} className="hover:text-[#0f2b5b] font-semibold">
-                    Resend code
-                  </button>
+                  <button onClick={() => { setStep('credentials'); setOtp(['','','','','','']); setError(''); }}
+                    className="hover:text-[#0f2b5b] font-semibold">← Back</button>
                 </div>
               </div>
             )}
@@ -374,7 +319,116 @@ export default function Login() {
         </div>
       </section>
 
-      <section className="bg-white py-16">
+      {/* MOBILE APP SECTION */}
+      <section className="bg-white py-20">
+        <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-12 items-center">
+          <div>
+            <p className="text-[#c9a227] text-xs font-bold tracking-[.3em] mb-3">MOBILE BANKING</p>
+            <h2 className="font-serif text-4xl text-[#0f2b5b] mb-5">
+              Your bank, in your pocket.
+            </h2>
+            <p className="text-gray-600 text-lg leading-relaxed mb-6">
+              Transfer funds, deposit checks, pay bills, and manage your cards —
+              all from our award-winning mobile experience. Available on iOS and Android.
+            </p>
+            <div className="space-y-4 mb-8">
+              {[
+                'Instant transfers between CFB accounts',
+                'Mobile check deposit with photo capture',
+                'Real-time notifications & alerts',
+                'Face ID and fingerprint login',
+              ].map(f => (
+                <div key={f} className="flex items-center gap-3">
+                  <span className="w-6 h-6 rounded-full bg-green-100 text-green-600 text-sm grid place-items-center font-bold flex-shrink-0">✓</span>
+                  <span className="text-gray-700">{f}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button className="bg-black text-white px-5 py-3 rounded-lg flex items-center gap-3 hover:bg-gray-800 transition">
+                <span className="text-2xl">🍎</span>
+                <div className="text-left leading-tight">
+                  <div className="text-[10px] text-gray-300">Download on the</div>
+                  <div className="font-bold text-sm">App Store</div>
+                </div>
+              </button>
+              <button className="bg-black text-white px-5 py-3 rounded-lg flex items-center gap-3 hover:bg-gray-800 transition">
+                <span className="text-2xl">▶</span>
+                <div className="text-left leading-tight">
+                  <div className="text-[10px] text-gray-300">Get it on</div>
+                  <div className="font-bold text-sm">Google Play</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Phone mockup */}
+          <div className="flex justify-center">
+            <div className="relative">
+              <div className="w-[320px] h-[640px] bg-gray-900 rounded-[3rem] p-3 shadow-2xl border-4 border-gray-800">
+                <div className="w-full h-full bg-gradient-to-br from-[#0f2b5b] to-[#0a2148] rounded-[2.5rem] overflow-hidden relative">
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-gray-900 rounded-b-2xl z-10"></div>
+
+                  <div className="pt-10 px-5 text-white">
+                    <div className="flex justify-between items-center mb-5">
+                      <div>
+                        <p className="text-[10px] text-blue-200">Good morning</p>
+                        <p className="font-bold text-sm">Alexander Reyes</p>
+                      </div>
+                      <div className="w-9 h-9 rounded-full bg-[#c9a227] grid place-items-center text-[#0f2b5b] font-bold text-xs">
+                        AR
+                      </div>
+                    </div>
+
+                    <div className="bg-white/10 rounded-xl p-4 mb-4 backdrop-blur">
+                      <p className="text-[10px] text-blue-200 uppercase tracking-wider">Available Balance</p>
+                      <p className="font-serif text-2xl font-bold mt-1">$87.3M</p>
+                      <p className="text-[10px] text-blue-200 mt-1">Acct ••••3650</p>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2 mb-4">
+                      {['↗','⌂','⬇','≡'].map((i, x) => (
+                        <div key={x} className="aspect-square bg-white/10 rounded-lg grid place-items-center text-lg">
+                          {i}
+                        </div>
+                      ))}
+                    </div>
+
+                    <p className="text-[10px] text-blue-200 uppercase tracking-wider mb-2">Recent</p>
+                    {[
+                      { n: 'Netflix', a: '-$22.99' },
+                      { n: 'Payroll', a: '+$8,500' },
+                      { n: 'Con Edison', a: '-$145' },
+                    ].map((t, x) => (
+                      <div key={x} className="flex justify-between py-2 border-b border-white/5">
+                        <span className="text-xs">{t.n}</span>
+                        <span className={`text-xs font-bold ${t.a.startsWith('+') ? 'text-green-300' : 'text-white'}`}>{t.a}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="absolute bottom-0 left-0 right-0 bg-white/5 backdrop-blur border-t border-white/10 px-6 py-3 flex justify-around">
+                    {['⌂','↗','📊','⚙'].map((i, x) => (
+                      <span key={x} className={`text-lg ${x === 0 ? 'text-[#c9a227]' : 'text-blue-200'}`}>{i}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="absolute -right-6 top-20 bg-white rounded-xl shadow-xl p-3 flex items-center gap-2">
+                <span className="w-9 h-9 rounded-full bg-green-50 grid place-items-center text-green-600 text-lg">✓</span>
+                <div className="text-xs">
+                  <p className="font-bold text-gray-800">Transfer sent</p>
+                  <p className="text-gray-500">Just now</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* TESTIMONIALS */}
+      <section className="bg-[#f4f6fa] py-16">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-12">
             <p className="text-[#c9a227] text-xs font-bold tracking-[.3em] mb-3">TRUSTED BY MILLIONS</p>
@@ -384,13 +438,11 @@ export default function Login() {
 
           <div className="grid md:grid-cols-3 gap-8">
             {testimonials.map(t => (
-              <div key={t.name} className="card p-7">
+              <div key={t.name} className="card p-7 bg-white">
                 <div className="flex gap-1 mb-4 text-[#c9a227]">
                   {'★★★★★'.split('').map((s, i) => <span key={i}>{s}</span>)}
                 </div>
-                <p className="text-gray-700 leading-relaxed mb-6 italic">
-                  "{t.quote}"
-                </p>
+                <p className="text-gray-700 leading-relaxed mb-6 italic">"{t.quote}"</p>
                 <div className="flex items-center gap-3 pt-5 border-t border-gray-100">
                   <img src={t.photo} alt={t.name} className="w-12 h-12 rounded-full object-cover" />
                   <div>
@@ -404,6 +456,7 @@ export default function Login() {
         </div>
       </section>
 
+      {/* CTA */}
       <section className="bg-gradient-to-br from-[#0f2b5b] to-[#0a2148] text-white py-16">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2 className="font-serif text-4xl mb-4">Ready to get started?</h2>
@@ -417,6 +470,7 @@ export default function Login() {
         </div>
       </section>
 
+      {/* FOOTER */}
       <footer className="bg-[#0a1a3a] text-blue-200 py-10 text-sm">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -447,6 +501,30 @@ export default function Login() {
           </div>
         </div>
       </footer>
+
+      <LiveChat />
+      {/* VIDEO MODAL */}
+      {showVideo && (
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+             onClick={() => setShowVideo(false)}>
+          <div className="max-w-4xl w-full" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-end mb-3">
+              <button onClick={() => setShowVideo(false)}
+                className="text-white hover:text-[#c9a227] font-bold text-3xl leading-none">
+                ×
+              </button>
+            </div>
+            <div className="bg-black rounded-lg overflow-hidden shadow-2xl">
+              <video autoPlay controls className="w-full" poster={HERO_POSTER}>
+                <source src={HERO_VIDEO} type="video/mp4" />
+              </video>
+            </div>
+            <p className="text-center text-white/70 text-sm mt-4">
+              Continental Federal Bank &amp; Trust · Est. 1989
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
