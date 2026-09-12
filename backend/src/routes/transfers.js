@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const auth = require('../middleware/auth');
 const prisma = require('../config/db');
+const { resolveBank, isOurBank } = require('../config/usBanks');
 
 const EXTERNAL_NAMES = [
   'JOHN SMITH', 'MARY JOHNSON', 'ROBERT WILLIAMS', 'PATRICIA BROWN',
@@ -16,39 +17,10 @@ const EXTERNAL_NAMES = [
   'LUKAS MULLER', 'ANNA SCHMIDT', 'CARLOS FERNANDEZ', 'ELENA MORENO',
 ];
 
-const EXTERNAL_BANKS = [
-  'Chase Bank, New York, NY',
-  'Bank of America, Charlotte, NC',
-  'Wells Fargo, San Francisco, CA',
-  'Citibank, New York, NY',
-  'Capital One, McLean, VA',
-  'US Bank, Minneapolis, MN',
-  'PNC Bank, Pittsburgh, PA',
-  'TD Bank, Cherry Hill, NJ',
-  'HSBC USA, New York, NY',
-  'Fifth Third Bank, Cincinnati, OH',
-  'Royal Bank of Canada, Toronto',
-  'TD Canada Trust, Toronto',
-  'Scotiabank, Toronto',
-  'Bank of Montreal, Toronto',
-  'CIBC, Toronto',
-  'National Bank of Canada, Montreal',
-  'BBVA Mexico, Mexico City',
-  'Banorte, Monterrey',
-  'Santander Mexico, Mexico City',
-  'Citibanamex, Mexico City',
-  'HSBC UK, London',
-  'Barclays, London',
-  'Deutsche Bank, Frankfurt',
-  'BNP Paribas, Paris',
-  'Banco Santander, Madrid',
-  'UBS AG, Zurich',
-];
-
-function hashNumber(accountNumber) {
+function hashNumber(str) {
   let hash = 0;
-  for (let i = 0; i < accountNumber.length; i++) {
-    hash = (hash * 31 + accountNumber.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
   }
   return hash;
 }
@@ -57,15 +29,18 @@ function resolveExternalName(accountNumber) {
   return EXTERNAL_NAMES[hashNumber(accountNumber) % EXTERNAL_NAMES.length];
 }
 
-function resolveExternalBank(accountNumber) {
-  return EXTERNAL_BANKS[hashNumber(accountNumber) % EXTERNAL_BANKS.length];
-}
-
 router.post('/', auth, async (req, res) => {
   try {
-    const { fromAccountId, toAccountNumber, amount, transferCode } = req.body;
+    const {
+      fromAccountId,
+      toAccountNumber,
+      toRoutingNumber,
+      amount,
+      transferCode,
+    } = req.body;
 
     if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
+    if (!toAccountNumber) return res.status(400).json({ error: 'Recipient account required' });
 
     const sender = await prisma.account.findUnique({ where: { id: fromAccountId } });
     if (!sender) return res.status(404).json({ error: 'Sender account not found' });
@@ -95,9 +70,15 @@ router.post('/', auth, async (req, res) => {
     let recipientName = recipient ? recipient.accountName : null;
     if (!recipientName) recipientName = resolveExternalName(toAccountNumber);
 
-    let recipientBank = isInternal
-      ? 'Continental Federal Bank & Trust'
-      : resolveExternalBank(toAccountNumber);
+    // Resolve bank name from routing number
+    let recipientBank;
+    if (isInternal) {
+      recipientBank = 'Continental Federal Bank & Trust, New York, NY';
+    } else if (toRoutingNumber) {
+      recipientBank = resolveBank(toRoutingNumber);
+    } else {
+      recipientBank = 'Beneficiary Bank';
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       const updatedSender = await tx.account.update({
@@ -140,16 +121,18 @@ router.post('/', auth, async (req, res) => {
         from: {
           name: sender.accountName,
           account: sender.accountNumber,
-          bank: 'Continental Federal Bank & Trust'
+          bank: 'Continental Federal Bank & Trust, New York, NY',
+          routing: '021407912',
         },
         to: {
           name: recipientName,
           account: toAccountNumber,
-          bank: recipientBank
+          bank: recipientBank,
+          routing: toRoutingNumber || (isInternal ? '021407912' : ''),
         },
         amount: Number(amount),
         balanceAfter: Number(result.balanceAfter),
-        note: result.note
+        note: result.note,
       }
     });
   } catch (err) {

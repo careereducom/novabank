@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const auth = require('../middleware/auth');
 const prisma = require('../config/db');
+const { resolveBank, isOurBank } = require('../config/usBanks');
 
 const EXTERNAL_NAMES = [
   'JOHN SMITH', 'MARY JOHNSON', 'ROBERT WILLIAMS', 'PATRICIA BROWN',
@@ -16,39 +17,10 @@ const EXTERNAL_NAMES = [
   'LUKAS MULLER', 'ANNA SCHMIDT', 'CARLOS FERNANDEZ', 'ELENA MORENO',
 ];
 
-const EXTERNAL_BANKS = [
-  'Chase Bank, New York, NY',
-  'Bank of America, Charlotte, NC',
-  'Wells Fargo, San Francisco, CA',
-  'Citibank, New York, NY',
-  'Capital One, McLean, VA',
-  'US Bank, Minneapolis, MN',
-  'PNC Bank, Pittsburgh, PA',
-  'TD Bank, Cherry Hill, NJ',
-  'HSBC USA, New York, NY',
-  'Fifth Third Bank, Cincinnati, OH',
-  'Royal Bank of Canada, Toronto',
-  'TD Canada Trust, Toronto',
-  'Scotiabank, Toronto',
-  'Bank of Montreal, Toronto',
-  'CIBC, Toronto',
-  'National Bank of Canada, Montreal',
-  'BBVA Mexico, Mexico City',
-  'Banorte, Monterrey',
-  'Santander Mexico, Mexico City',
-  'Citibanamex, Mexico City',
-  'HSBC UK, London',
-  'Barclays, London',
-  'Deutsche Bank, Frankfurt',
-  'BNP Paribas, Paris',
-  'Banco Santander, Madrid',
-  'UBS AG, Zurich',
-];
-
-function hashNumber(accountNumber) {
+function hashNumber(str) {
   let hash = 0;
-  for (let i = 0; i < accountNumber.length; i++) {
-    hash = (hash * 31 + accountNumber.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
   }
   return hash;
 }
@@ -57,39 +29,59 @@ function resolveExternalName(accountNumber) {
   return EXTERNAL_NAMES[hashNumber(accountNumber) % EXTERNAL_NAMES.length];
 }
 
-function resolveExternalBank(accountNumber) {
-  return EXTERNAL_BANKS[hashNumber(accountNumber) % EXTERNAL_BANKS.length];
-}
-
 router.get('/', auth, async (req, res) => {
   const accounts = await prisma.account.findMany({ where: { userId: req.userId } });
   res.json(accounts);
 });
 
+/**
+ * Name enquiry — accepts optional routing number.
+ *   GET /api/accounts/resolve/:accountNumber?routing=021000021
+ *
+ * Response includes:
+ *   accountName      — beneficiary name
+ *   accountNumber    — account number
+ *   bankName         — resolved bank name (from routing)
+ *   routingNumber    — routing number passed in
+ *   isInternal       — true if this is a CFB account
+ *   isOurBank        — true if routing is CFB's own
+ */
 router.get('/resolve/:accountNumber', auth, async (req, res) => {
   const { accountNumber } = req.params;
+  const routingNumber = (req.query.routing || '').trim();
 
+  // Look up the account in our own bank first
   const account = await prisma.account.findUnique({
     where: { accountNumber },
     select: { accountName: true, accountNumber: true, isRegistered: true }
   });
 
   if (account) {
+    // Our own account — bank name is always Continental Federal
     return res.json({
       resolved: true,
       accountName: account.accountName,
-      bankName: 'Continental Federal Bank & Trust',
       accountNumber: account.accountNumber,
-      isInternal: account.isRegistered
+      bankName: 'Continental Federal Bank & Trust, New York, NY',
+      routingNumber: routingNumber || '021407912',
+      isInternal: account.isRegistered,
+      isOurBank: true,
     });
   }
 
-  res.json({
+  // External account — resolve bank name from routing number
+  const bankName = routingNumber
+    ? resolveBank(routingNumber)
+    : 'External Bank';
+
+  return res.json({
     resolved: true,
     accountName: resolveExternalName(accountNumber),
-    bankName: resolveExternalBank(accountNumber),
     accountNumber,
-    isInternal: false
+    bankName,
+    routingNumber,
+    isInternal: false,
+    isOurBank: routingNumber ? isOurBank(routingNumber) : false,
   });
 });
 

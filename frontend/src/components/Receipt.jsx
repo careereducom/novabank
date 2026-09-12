@@ -5,7 +5,10 @@ export default function Receipt({ receipt, onClose }) {
 
   const displayStatus = receipt.status === 'PENDING' ? 'PROCESSING' : receipt.status;
 
-  const buildText = () => `════════════════════════════
+  const buildText = () => {
+    const fromRouting = receipt.from.routing ? `\nRouting   : ${receipt.from.routing}` : '';
+    const toRouting   = receipt.to.routing   ? `\nRouting   : ${receipt.to.routing}`   : '';
+    return `════════════════════════════
    CONTINENTAL FEDERAL BANK & TRUST
         TRANSFER RECEIPT
 ════════════════════════════
@@ -15,13 +18,13 @@ Status    : ${displayStatus}
 
 FROM
 Name      : ${receipt.from.name}
-Account   : ${receipt.from.account}
-Bank      : ${receipt.from.bank || 'Continental Federal Bank & Trust'}
+Account   : ${receipt.from.account}${fromRouting}
+Bank      : ${receipt.from.bank}
 
 TO
 Name      : ${receipt.to.name}
-Account   : ${receipt.to.account}
-Bank      : ${receipt.to.bank || 'Beneficiary Bank'}
+Account   : ${receipt.to.account}${toRouting}
+Bank      : ${receipt.to.bank}
 
 ────────────────────────────
 AMOUNT    : ${money(receipt.amount)}
@@ -34,6 +37,7 @@ Thank you for banking with
 Continental Federal Bank & Trust.
 Member FDIC · Est. 1989
 ════════════════════════════`;
+  };
 
   const shareWhatsApp = () => {
     window.open('https://wa.me/?text=' + encodeURIComponent(buildText()), '_blank');
@@ -93,7 +97,7 @@ Member FDIC · Est. 1989
             ✈️ Telegram
           </button>
           <button onClick={shareIMessage}
-            className="bg-[#0a84ff] hover:brightness-110 text-white font-bold py-3 rounded-md transition text-sm">
+            className="bg-[#0a84ff] hover:brightness-110 text-white font-bold rounded-md transition text-sm py-3">
             ✉️ iMessage
           </button>
           <button onClick={shareEmail}

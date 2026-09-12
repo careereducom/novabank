@@ -3,10 +3,25 @@ import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../api';
 import Receipt from './Receipt';
 
+const ROUTING_PRESETS = [
+  { value: '', label: 'Select beneficiary bank (optional)' },
+  { value: '021407912', label: 'Continental Federal Bank & Trust' },
+  { value: '021000021', label: 'JPMorgan Chase Bank' },
+  { value: '026009593', label: 'Bank of America' },
+  { value: '121000248', label: 'Wells Fargo Bank' },
+  { value: '021001088', label: 'Citibank' },
+  { value: '031000503', label: 'PNC Bank' },
+  { value: '051000017', label: 'Capital One' },
+  { value: '091000019', label: 'U.S. Bank' },
+  { value: '124003116', label: 'KeyBank' },
+  { value: '256074974', label: 'Navy Federal Credit Union' },
+];
+
 export default function Transfer() {
   const { accounts, token, refreshAccounts } = useAuth();
   const [fromAccountId, setFromAccountId] = useState(accounts[0]?.id || '');
   const [toAccountNumber, setToAccountNumber] = useState('');
+  const [toRoutingNumber, setToRoutingNumber] = useState('');
   const [amount, setAmount] = useState('');
   const [enquiry, setEnquiry] = useState(null);
   const [showPinModal, setShowPinModal] = useState(false);
@@ -25,14 +40,15 @@ export default function Transfer() {
     let cancel = false;
     const t = setTimeout(async () => {
       try {
-        const data = await apiFetch(`/accounts/resolve/${toAccountNumber}`, {}, token);
+        const qs = toRoutingNumber ? `?routing=${toRoutingNumber}` : '';
+        const data = await apiFetch(`/accounts/resolve/${toAccountNumber}${qs}`, {}, token);
         if (!cancel) setEnquiry(data);
       } catch {
         if (!cancel) setEnquiry({ resolved: false, message: 'Unable to resolve account' });
       }
     }, 400);
     return () => { cancel = true; clearTimeout(t); };
-  }, [toAccountNumber, token]);
+  }, [toAccountNumber, toRoutingNumber, token]);
 
   const initiate = () => {
     setError('');
@@ -51,6 +67,7 @@ export default function Transfer() {
         body: JSON.stringify({
           fromAccountId,
           toAccountNumber,
+          toRoutingNumber,
           amount: Number(amount),
           transferCode
         })
@@ -69,6 +86,7 @@ export default function Transfer() {
 
   const clearForm = () => {
     setToAccountNumber('');
+    setToRoutingNumber('');
     setAmount('');
     setEnquiry(null);
     setReceipt(null);
@@ -97,6 +115,23 @@ export default function Transfer() {
 
         <div>
           <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
+            Recipient Bank (Routing Number)
+          </label>
+          <select
+            value={toRoutingNumber}
+            onChange={e => setToRoutingNumber(e.target.value)}
+            className="field">
+            {ROUTING_PRESETS.map(r => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-400 mt-1">
+            Optional — needed for accurate inter-bank transfers
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
             Recipient Account Number
           </label>
           <input
@@ -111,7 +146,10 @@ export default function Transfer() {
             <div className="mt-2 px-4 py-3 rounded-md bg-green-50 border border-green-200">
               <p className="text-sm font-bold text-green-800">✓ {enquiry.accountName}</p>
               <p className="text-xs text-green-700 mt-0.5">{enquiry.bankName}</p>
-              <p className="text-xs text-green-600 font-mono mt-0.5">{enquiry.accountNumber}</p>
+              <p className="text-xs text-green-600 font-mono mt-0.5">
+                Acct {enquiry.accountNumber}
+                {enquiry.routingNumber ? ` · Routing ${enquiry.routingNumber}` : ''}
+              </p>
             </div>
           )}
         </div>
@@ -154,7 +192,8 @@ export default function Transfer() {
             {enquiry && enquiry.resolved && (
               <div className="text-center text-xs text-gray-500 mb-5">
                 To <strong>{enquiry.accountName}</strong><br/>
-                <span className="text-gray-400">{enquiry.bankName}</span>
+                <span className="text-gray-400">{enquiry.bankName}</span><br/>
+                <span className="text-gray-400 font-mono">Acct {enquiry.accountNumber}</span>
               </div>
             )}
 
