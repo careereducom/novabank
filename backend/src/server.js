@@ -63,6 +63,7 @@ app.use('/api/bills',                           require('./routes/bills'));
 app.use('/api/deposits',                        require('./routes/deposits'));
 app.use('/api/statements',                      require('./routes/statements'));
 app.use('/api/audit',                           require('./routes/audit'));
+app.use('/api/notifications',                   require('./routes/notifications'));
 app.use('/api/signup',                          require('./routes/signup'));
 app.use('/api/cards',                           require('./routes/cards'));
 app.use('/api/direct-deposit',                  require('./routes/directDeposit'));

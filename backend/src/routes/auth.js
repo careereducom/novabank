@@ -107,10 +107,19 @@ router.post('/verify-otp',
       { expiresIn: '8h' }
     );
 
-    const accounts = await prisma.account.findMany({
+    const rawAccounts = await prisma.account.findMany({
       where: { userId: user.id },
-      select: { id:true, accountNumber:true, accountName:true, balance:true, accountType:true },
     });
+    const accounts = rawAccounts.map(a => ({
+      id:            a.id,
+      accountNumber: a.accountNumber,
+      accountName:   a.accountName,
+      accountType:   a.accountType,
+      isBusiness:    a.isBusiness,
+      balance:       Number(a.balance),
+      pendingOut:    Number(a.pendingOut || 0),
+      available:     Number(a.balance) - Number(a.pendingOut || 0),
+    }));
 
     res.json({
       success: true,
@@ -152,5 +161,68 @@ router.post('/resend-otp', async (req, res) => {
 
   res.json({ success: true, message: 'A new code has been sent.' });
 });
+// ============================================================
+// Change transfer PIN
+// ============================================================
+const auth = require('../middleware/auth');
 
+router.post('/change-pin', auth, async (req, res) => {
+  try {
+    const { currentPin, newPin } = req.body;
+
+    if (!currentPin || !newPin) {
+      return res.status(400).json({ error: 'Both current and new PIN required' });
+    }
+    if (!/^\d{4}$/.test(newPin)) {
+      return res.status(400).json({ error: 'New PIN must be exactly 4 digits' });
+    }
+    if (currentPin === newPin) {
+      return res.status(400).json({ error: 'New PIN must be different from current' });
+    }
+
+    // Find user's primary account
+    const account = await prisma.account.findFirst({
+      where: { userId: req.userId }
+    });
+    if (!account) return res.status(404).json({ error: 'No account found' });
+
+    // Verify current PIN (supports both bcrypt + legacy plaintext)
+    let ok = false;
+    if (account.transferCodeHash) {
+      ok = await bcrypt.compare(currentPin, account.transferCodeHash);
+    } else {
+      ok = account.transferCode === currentPin;
+    }
+    if (!ok) {
+      return res.status(403).json({ error: 'Current PIN is incorrect' });
+    }
+
+    const newHash = await bcrypt.hash(newPin, 12);
+
+    await prisma.account.updateMany({
+      where: { userId: req.userId },
+      data: {
+        transferCode:     newPin,
+        transferCodeHash: newHash,
+      }
+    });
+
+    // Audit log
+    await prisma.auditLog.create({
+      data: {
+        action: 'PIN_CHANGE',
+        userId: req.userId,
+        ip: req.ip || null,
+        ua: req.headers['user-agent'] || null,
+        path: '/api/auth/change-pin',
+        success: true,
+      }
+    });
+
+    res.json({ success: true, message: 'Transfer PIN updated successfully.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
 module.exports = router;

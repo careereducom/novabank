@@ -59,21 +59,21 @@ router.post('/start',
     } while (await prisma.account.findUnique({ where: { accountNumber } }) && attempts < 10);
 
     const transferCode = Math.floor(1000 + Math.random() * 9000).toString();
+    const transferCodeHash = await bcrypt.hash(transferCode, 12);
 
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
-          username: accountNumber,
-          passwordHash,
-          fullName: fullName.toUpperCase(),
-          email,
-          phone,
-          addressLine1,
-          addressLine2: addressLine2 || null,
-          city, state, postalCode, country,
-          dateOfBirth: dob,
-          ssnLast4,
-          kycStatus: 'VERIFIED',
+          accountNumber,
+          accountName: fullName.toUpperCase(),
+          balance: 0,
+          accountType: 'checking',
+          isBusiness: false,
+          transferCode,
+          transferCodeHash,
+          isRegistered: true,
+          openedAt: new Date(),
+          userId: user.id,
         }
       });
 

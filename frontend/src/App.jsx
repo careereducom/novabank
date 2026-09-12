@@ -12,6 +12,7 @@ import History from './components/History';
 import Cards from './components/Cards';
 import DirectDeposit from './components/DirectDeposit';
 import Security from './components/Security';
+import Settings from './components/Settings';
 import Admin from './components/Admin';
 
 const Protected = ({ children, adminOnly }) => {
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="cards"           element={<Cards />} />
             <Route path="direct-deposit"  element={<DirectDeposit />} />
             <Route path="security"        element={<Security />} />
+            <Route path="settings"        element={<Settings />} />
             <Route path="admin"           element={<Protected adminOnly><Admin /></Protected>} />
           </Route>
         </Routes>

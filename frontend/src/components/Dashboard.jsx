@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../api';
 
 export default function Dashboard() {
-  const { user, accounts, token } = useAuth();
+  const { user, accounts, token, refreshAccounts } = useAuth();
   const [recent, setRecent] = useState([]);
 
   const money = n => '$' + Number(n).toLocaleString('en-US', {
@@ -26,9 +26,15 @@ export default function Dashboard() {
     apiFetch('/transfers/history', {}, token)
       .then(data => setRecent(data.slice(0, 6)))
       .catch(() => {});
+    // Refresh accounts to get latest balances
+    apiFetch('/accounts', {}, token)
+      .then(fresh => refreshAccounts(fresh))
+      .catch(() => {});
   }, [token]);
 
-  const total = accounts.reduce((s, a) => s + Number(a.balance), 0);
+  const totalBalance   = accounts.reduce((s, a) => s + Number(a.balance), 0);
+  const totalPending   = accounts.reduce((s, a) => s + Number(a.pendingOut || 0), 0);
+  const totalAvailable = totalBalance - totalPending;
 
   return (
     <div>
@@ -42,50 +48,99 @@ export default function Dashboard() {
         </p>
       </div>
 
+      {/* BALANCE CARD */}
       <div className="bg-gradient-to-br from-[#0f2b5b] to-[#0a2148] text-white rounded-xl p-8 mb-6 shadow-lg">
-        <p className="text-xs font-bold tracking-[.25em] text-blue-200 uppercase">
-          Total Deposits
-        </p>
-        <p className="font-serif text-5xl font-bold mt-3">{money(total)}</p>
-        <p className="text-blue-200 text-sm mt-3">
-          {accounts.length} account{accounts.length > 1 ? 's' : ''} · FDIC insured up to $250,000
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {accounts.map(a => (
-          <div key={a.id} className="card p-6">
-            <div className="flex justify-between items-start mb-5">
-              <div>
-                <p className="text-[10px] font-bold tracking-[.2em] text-gray-400 uppercase">
-                  {a.accountType}
-                </p>
-                <p className="font-mono text-xs text-gray-500 mt-1">{a.accountNumber}</p>
-              </div>
-              <span className="bg-green-50 text-green-700 text-[10px] font-bold px-2.5 py-1 rounded-full tracking-wide">
-                ACTIVE
-              </span>
-            </div>
-
-            <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Available</p>
-            <p className="font-serif text-3xl font-bold text-[#0f2b5b]">
-              {money(a.balance)}
+        <div className="grid md:grid-cols-3 gap-6">
+          <div>
+            <p className="text-xs font-bold tracking-[.25em] text-blue-200 uppercase">
+              Current Balance
             </p>
-
-            <div className="divider my-5"></div>
-
-            <div className="flex gap-3">
-              <Link to="/transfer" className="btn-primary flex-1 text-center text-sm py-3">
-                Transfer
-              </Link>
-              <Link to="/statement" className="flex-1 text-center border border-gray-300 hover:border-[#0f2b5b] hover:text-[#0f2b5b] text-gray-700 font-semibold text-sm py-3 rounded-md transition">
-                Statement
-              </Link>
-            </div>
+            <p className="font-serif text-4xl font-bold mt-3">{money(totalBalance)}</p>
+            <p className="text-blue-200 text-xs mt-2">
+              {accounts.length} account{accounts.length > 1 ? 's' : ''} · FDIC insured
+            </p>
           </div>
-        ))}
+
+          <div>
+            <p className="text-xs font-bold tracking-[.25em] text-blue-200 uppercase">
+              Pending Outgoing
+            </p>
+            <p className="font-serif text-4xl font-bold mt-3 text-amber-300">
+              {money(totalPending)}
+            </p>
+            <p className="text-blue-200 text-xs mt-2">
+              Held for inter-bank settlement
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs font-bold tracking-[.25em] text-blue-200 uppercase">
+              Available Balance
+            </p>
+            <p className="font-serif text-4xl font-bold mt-3 text-green-300">
+              {money(totalAvailable)}
+            </p>
+            <p className="text-blue-200 text-xs mt-2">
+              Ready to spend now
+            </p>
+          </div>
+        </div>
       </div>
 
+      {/* ACCOUNT CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {accounts.map(a => {
+          const pending = Number(a.pendingOut || 0);
+          const avail   = Number(a.available ?? (a.balance - pending));
+          return (
+            <div key={a.id} className="card p-6">
+              <div className="flex justify-between items-start mb-5">
+                <div>
+                  <p className="text-[10px] font-bold tracking-[.2em] text-gray-400 uppercase">
+                    {a.accountType}
+                  </p>
+                  <p className="font-mono text-xs text-gray-500 mt-1">{a.accountNumber}</p>
+                </div>
+                <span className="bg-green-50 text-green-700 text-[10px] font-bold px-2.5 py-1 rounded-full tracking-wide">
+                  ACTIVE
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-5">
+                <div>
+                  <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Current</p>
+                  <p className="font-serif text-xl font-bold text-[#0f2b5b]">{money(a.balance)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Available</p>
+                  <p className="font-serif text-xl font-bold text-green-600">{money(avail)}</p>
+                </div>
+              </div>
+
+              {pending > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-4">
+                  <p className="text-xs text-amber-800 font-semibold">
+                    ⏳ {money(pending)} pending outgoing
+                  </p>
+                </div>
+              )}
+
+              <div className="divider mb-5"></div>
+
+              <div className="flex gap-3">
+                <Link to="/transfer" className="btn-primary flex-1 text-center text-sm py-3">
+                  Transfer
+                </Link>
+                <Link to="/statement" className="flex-1 text-center border border-gray-300 hover:border-[#0f2b5b] hover:text-[#0f2b5b] text-gray-700 font-semibold text-sm py-3 rounded-md transition">
+                  Statement
+                </Link>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* QUICK ACTIONS */}
       <div className="mt-8">
         <p className="text-xs font-bold tracking-[.2em] text-gray-400 uppercase mb-4">
           Quick Actions
@@ -106,6 +161,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* RECENT ACTIVITY */}
       <div className="mt-8">
         <div className="flex justify-between items-center mb-4">
           <p className="text-xs font-bold tracking-[.2em] text-gray-400 uppercase">
@@ -136,7 +192,9 @@ export default function Dashboard() {
                   <p className={`font-bold text-sm ${isCredit ? 'text-green-600' : 'text-red-600'}`}>
                     {isCredit ? '+' : '−'}{money(t.amount)}
                   </p>
-                  <p className="text-xs text-gray-400 mt-0.5">{t.status === 'PENDING' ? 'PROCESSING' : t.status}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {t.status === 'PENDING' ? 'PROCESSING' : t.status}
+                  </p>
                 </div>
               </div>
             );

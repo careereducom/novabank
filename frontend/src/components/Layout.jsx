@@ -1,5 +1,6 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import NotificationBell from './NotificationBell';
 import { useAuth } from '../context/AuthContext';
 
 export default function Layout() {
@@ -25,7 +26,7 @@ export default function Layout() {
     { to: '/cards',          label: 'Cards' },
     { to: '/direct-deposit', label: 'Direct Deposit' },
     { to: '/history',        label: 'History' },
-    { to: '/security',       label: 'Security' },
+    { to: '/settings',       label: 'Settings' },
   ];
   if (user?.isAdmin) nav.push({ to: '/admin', label: 'Operations' });
 
@@ -51,6 +52,7 @@ export default function Layout() {
             <span className="hidden md:block font-mono text-xs text-blue-200">
               {hh}:{mm}:{ss}
             </span>
+<NotificationBell />
             <span className="hidden md:block text-blue-100 text-xs">{user?.fullName}</span>
             <button
               onClick={() => { logout(); navigate('/login'); }}

@@ -29,35 +29,45 @@ function resolveExternalName(accountNumber) {
   return EXTERNAL_NAMES[hashNumber(accountNumber) % EXTERNAL_NAMES.length];
 }
 
+/**
+ * GET /api/accounts
+ * Returns each account with:
+ *   balance     — current total
+ *   pendingOut  — held for pending transfers
+ *   available   — balance − pendingOut
+ */
 router.get('/', auth, async (req, res) => {
-  const accounts = await prisma.account.findMany({ where: { userId: req.userId } });
-  res.json(accounts);
+  const accounts = await prisma.account.findMany({
+    where: { userId: req.userId }
+  });
+  const enriched = accounts.map(a => ({
+    id:            a.id,
+    accountNumber: a.accountNumber,
+    accountName:   a.accountName,
+    accountType:   a.accountType,
+    isBusiness:    a.isBusiness,
+    balance:       Number(a.balance),
+    pendingOut:    Number(a.pendingOut || 0),
+    available:     Number(a.balance) - Number(a.pendingOut || 0),
+    openedAt:      a.openedAt,
+  }));
+  res.json(enriched);
 });
 
 /**
- * Name enquiry — accepts optional routing number.
+ * Name enquiry with routing resolution.
  *   GET /api/accounts/resolve/:accountNumber?routing=021000021
- *
- * Response includes:
- *   accountName      — beneficiary name
- *   accountNumber    — account number
- *   bankName         — resolved bank name (from routing)
- *   routingNumber    — routing number passed in
- *   isInternal       — true if this is a CFB account
- *   isOurBank        — true if routing is CFB's own
  */
 router.get('/resolve/:accountNumber', auth, async (req, res) => {
   const { accountNumber } = req.params;
   const routingNumber = (req.query.routing || '').trim();
 
-  // Look up the account in our own bank first
   const account = await prisma.account.findUnique({
     where: { accountNumber },
     select: { accountName: true, accountNumber: true, isRegistered: true }
   });
 
   if (account) {
-    // Our own account — bank name is always Continental Federal
     return res.json({
       resolved: true,
       accountName: account.accountName,
@@ -69,7 +79,6 @@ router.get('/resolve/:accountNumber', auth, async (req, res) => {
     });
   }
 
-  // External account — resolve bank name from routing number
   const bankName = routingNumber
     ? resolveBank(routingNumber)
     : 'External Bank';
