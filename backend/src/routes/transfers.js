@@ -4,6 +4,7 @@ const auth    = require('../middleware/auth');
 const prisma  = require('../config/db');
 const { resolveBank, isOurBank } = require('../config/usBanks');
 const { createNotification }    = require('../utils/notify');
+const { sendOtpEmail }          = require('../config/mailer');
 
 const EXTERNAL_NAMES = [
   'JOHN SMITH', 'MARY JOHNSON', 'ROBERT WILLIAMS', 'PATRICIA BROWN',
@@ -31,13 +32,16 @@ function resolveExternalName(accountNumber) {
   return EXTERNAL_NAMES[hashNumber(accountNumber) % EXTERNAL_NAMES.length];
 }
 
+function makeRef(prefix) {
+  return prefix + Date.now().toString(36).toUpperCase() +
+         Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+
 const MAX_PIN_ATTEMPTS = 3;
 const PIN_LOCK_MINUTES = 30;
+const OTP_EXPIRY_MIN   = 10;
+const OTP_MAX_ATTEMPTS = 3;
 
-/**
- * Verify the transfer PIN.
- * Supports both bcrypt-hashed (new) and plaintext (legacy) codes.
- */
 async function verifyPin(account, code) {
   if (account.transferCodeHash) {
     return bcrypt.compare(code, account.transferCodeHash);
@@ -46,18 +50,10 @@ async function verifyPin(account, code) {
 }
 
 // ============================================================
-// POST /api/transfers
-// Initiates a transfer.
-//   • Internal (CFB → CFB): sender notified, receiver notified
-//   • External (CFB → other bank): sender notified, receiver
-//     "notified" via simulated inter-bank settlement
-//
-// Balance is NOT deducted at initiation.
-//   balance       stays the same
-//   pendingOut    increases
-//   available = balance - pendingOut
+// POST /api/transfers/initiate
+// Step 1 — verify PIN, store pending action, send OTP
 // ============================================================
-router.post('/', auth, async (req, res) => {
+router.post('/initiate', auth, async (req, res) => {
   try {
     const {
       fromAccountId,
@@ -69,11 +65,11 @@ router.post('/', auth, async (req, res) => {
 
     if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
     if (!toAccountNumber) return res.status(400).json({ error: 'Recipient account required' });
+    if (!transferCode) return res.status(400).json({ error: 'Transfer PIN required' });
 
-    // Load sender + their user (for PIN lock)
     const sender = await prisma.account.findUnique({
       where: { id: fromAccountId },
-      include: { user: true }
+      include: { user: true },
     });
     if (!sender) return res.status(404).json({ error: 'Sender account not found' });
     if (sender.userId !== req.userId) return res.status(403).json({ error: 'Access denied' });
@@ -101,7 +97,7 @@ router.post('/', auth, async (req, res) => {
       if (attempts >= MAX_PIN_ATTEMPTS) {
         await createNotification(senderUser.id, 'FAILED',
           'Account temporarily locked',
-          `Too many incorrect transfer codes. Your account is locked for ${PIN_LOCK_MINUTES} minutes.`
+          `Too many incorrect transfer codes. Locked for ${PIN_LOCK_MINUTES} minutes.`
         );
         return res.status(403).json({
           error: `Too many incorrect attempts. Account locked for ${PIN_LOCK_MINUTES} minutes.`
@@ -130,17 +126,119 @@ router.post('/', auth, async (req, res) => {
       });
     }
 
-    // ── Resolve recipient ─────────────────────────────────────
+    // ── Generate OTP + store pending action ───────────────────
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MIN * 60 * 1000);
+
+    // Clean up old pending actions for this user (one at a time)
+    await prisma.pendingAction.deleteMany({
+      where: { userId: req.userId, type: 'TRANSFER' }
+    });
+
+    const action = await prisma.pendingAction.create({
+      data: {
+        userId: req.userId,
+        type: 'TRANSFER',
+        payload: JSON.stringify({
+          fromAccountId,
+          toAccountNumber,
+          toRoutingNumber,
+          amount: Number(amount),
+        }),
+        otp,
+        otpExpiry,
+      }
+    });
+
+    // Send OTP to email
+    const recipient = process.env.DEMO_EMAIL || senderUser.email;
+    const masked = recipient.replace(/^(.{2}).*@/, '$1***@');
+
+    sendOtpEmail(recipient, otp, senderUser.fullName)
+      .then(() => console.log(`[TRANSFER-OTP] Sent to ${recipient}`))
+      .catch(err => console.error('[TRANSFER-OTP] Failed:', err.message));
+
+    res.json({
+      success: true,
+      otpRequired: true,
+      pendingId: action.id,
+      destination: masked,
+      expiresIn: OTP_EXPIRY_MIN * 60,
+      message: `A 6-digit verification code has been sent to ${masked}.`,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to initiate transfer' });
+  }
+});
+
+// ============================================================
+// POST /api/transfers/confirm
+// Step 2 — verify OTP, execute transfer
+// ============================================================
+router.post('/confirm', auth, async (req, res) => {
+  try {
+    const { pendingId, otp } = req.body;
+
+    if (!pendingId) return res.status(400).json({ error: 'Missing pending transaction' });
+    if (!otp) return res.status(400).json({ error: 'Verification code required' });
+
+    const action = await prisma.pendingAction.findUnique({
+      where: { id: pendingId },
+      include: { user: true },
+    });
+    if (!action || action.userId !== req.userId || action.type !== 'TRANSFER') {
+      return res.status(404).json({ error: 'Transaction not found or expired' });
+    }
+
+    if (new Date() > action.otpExpiry) {
+      await prisma.pendingAction.delete({ where: { id: action.id } });
+      return res.status(400).json({ error: 'Verification code expired. Please try again.' });
+    }
+
+    if (action.attempts >= OTP_MAX_ATTEMPTS) {
+      await prisma.pendingAction.delete({ where: { id: action.id } });
+      return res.status(403).json({ error: 'Too many attempts. Transaction cancelled.' });
+    }
+
+    if (action.otp !== otp.trim()) {
+      await prisma.pendingAction.update({
+        where: { id: action.id },
+        data: { attempts: action.attempts + 1 }
+      });
+      const remaining = OTP_MAX_ATTEMPTS - (action.attempts + 1);
+      return res.status(401).json({
+        error: `Incorrect verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`
+      });
+    }
+
+    // ── OTP correct — execute transfer ────────────────────────
+    const { fromAccountId, toAccountNumber, toRoutingNumber, amount } =
+      JSON.parse(action.payload);
+
+    const sender = await prisma.account.findUnique({
+      where: { id: fromAccountId },
+      include: { user: true },
+    });
+    if (!sender) return res.status(404).json({ error: 'Sender account not found' });
+
+    const available = Number(sender.balance) - Number(sender.pendingOut || 0);
+    if (available < amount) {
+      await prisma.pendingAction.delete({ where: { id: action.id } });
+      return res.status(400).json({
+        error: 'Insufficient funds. Balance changed since initiation.'
+      });
+    }
+
     const recipient = await prisma.account.findUnique({
       where: { accountNumber: toAccountNumber },
-      include: { user: true }
+      include: { user: true },
     });
 
     const isInternal = !!(recipient && recipient.isRegistered);
     const finalStatus = isInternal ? 'SUCCESS' : 'PENDING';
 
     let recipientName = recipient ? recipient.accountName : resolveExternalName(toAccountNumber);
-
     let recipientBank;
     if (isInternal) {
       recipientBank = 'Continental Federal Bank & Trust, New York, NY';
@@ -150,20 +248,17 @@ router.post('/', auth, async (req, res) => {
       recipientBank = 'Beneficiary Bank';
     }
 
-    const reference = 'NB' + Date.now() + Math.floor(Math.random() * 90 + 10);
+    const reference = makeRef('NB');
     const note = isInternal
       ? 'Transfer completed successfully.'
       : 'Inter-bank transfer initiated. Awaiting settlement confirmation.';
 
-    // ── Execute in transaction ────────────────────────────────
     const result = await prisma.$transaction(async (tx) => {
-      // Sender: increase pendingOut (do NOT touch balance)
       const updatedSender = await tx.account.update({
         where: { id: sender.id },
         data:  { pendingOut: { increment: amount } }
       });
 
-      // Internal: credit receiver right away
       if (isInternal && recipient) {
         await tx.account.update({
           where: { id: recipient.id },
@@ -191,11 +286,11 @@ router.post('/', auth, async (req, res) => {
       });
     });
 
-    // ── Notifications ─────────────────────────────────────────
+    // Notifications
     const amountStr = '$' + Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2 });
 
     await createNotification(
-      senderUser.id,
+      sender.userId,
       'TRANSFER_OUT',
       isInternal ? 'Transfer sent' : 'Transfer initiated',
       isInternal
@@ -214,12 +309,20 @@ router.post('/', auth, async (req, res) => {
       );
     }
 
+    // Delete pending action
+    await prisma.pendingAction.delete({ where: { id: action.id } });
+
     res.json({
       success: true,
       receipt: {
         reference,
         date: result.createdAt,
         status: finalStatus,
+        network: {
+          network: isInternal ? 'Internal Transfer' : 'FedNow Service',
+          settlementTime: isInternal ? 'Instant' : 'Instant (seconds)',
+          networkCode: isInternal ? 'CFB_INTERNAL' : 'FEDNOW',
+        },
         from: {
           name: sender.accountName,
           account: sender.accountNumber,
@@ -239,7 +342,7 @@ router.post('/', auth, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Transfer failed. Please try again.' });
+    res.status(500).json({ error: 'Failed to confirm transfer' });
   }
 });
 

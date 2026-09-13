@@ -1,28 +1,19 @@
 /**
- * Payroll API — for orphanage payroll officers.
- *
- *   GET    /api/payroll/workers            — list workers
- *   POST   /api/payroll/workers            — add new worker
- *   PUT    /api/payroll/workers/:id        — edit worker
- *   DELETE /api/payroll/workers/:id        — deactivate worker
- *
- *   POST   /api/payroll/pay                — pay a single worker
- *   POST   /api/payroll/batch              — batch payment to multiple workers
- *   GET    /api/payroll/payments           — payment history
- *   GET    /api/payroll/payments/:id/payslip — PDF payslip
- *
- *   GET    /api/payroll/stats              — dashboard KPIs
+ * Payroll API with per-transaction OTP.
  */
 const router = require('express').Router();
 const PDFDocument = require('pdfkit');
+const bcrypt = require('bcryptjs');
 const auth = require('../middleware/auth');
 const prisma = require('../config/db');
 const bankConfig = require('../config/bank');
 const { createNotification } = require('../utils/notify');
+const { sendOtpEmail } = require('../config/mailer');
 
 const MAX_PIN_ATTEMPTS = 3;
-
-// ── Helpers ───────────────────────────────────────────────────────────
+const PIN_LOCK_MINUTES = 30;
+const OTP_EXPIRY_MIN   = 10;
+const OTP_MAX_ATTEMPTS = 3;
 
 async function getPayrollAccount(req) {
   return await prisma.account.findFirst({
@@ -32,7 +23,6 @@ async function getPayrollAccount(req) {
 }
 
 async function verifyPayrollPin(account, pin) {
-  // Payroll accounts use plaintext PIN (same as regular transfer codes)
   return account.transferCode === pin;
 }
 
@@ -49,18 +39,17 @@ async function checkPinWithLockout(account, pin) {
     const attempts = (user.pinAttempts || 0) + 1;
     const data = { pinAttempts: attempts };
     if (attempts >= MAX_PIN_ATTEMPTS) {
-      data.pinLockedUntil = new Date(Date.now() + 30 * 60 * 1000);
+      data.pinLockedUntil = new Date(Date.now() + PIN_LOCK_MINUTES * 60 * 1000);
       await prisma.user.update({ where: { id: user.id }, data });
       await createNotification(user.id, 'FAILED',
         'Payroll account locked',
-        'Too many incorrect PIN attempts. Account locked for 30 minutes.');
-      throw { status: 403, message: 'Too many attempts. Account locked for 30 minutes.' };
+        `Too many incorrect PIN attempts. Locked for ${PIN_LOCK_MINUTES} minutes.`);
+      throw { status: 403, message: 'Too many attempts. Locked for 30 minutes.' };
     }
     await prisma.user.update({ where: { id: user.id }, data });
     throw { status: 403, message: `Incorrect PIN. ${MAX_PIN_ATTEMPTS - attempts} attempts remaining.` };
   }
 
-  // Success — reset
   if ((user.pinAttempts || 0) > 0 || user.pinLockedUntil) {
     await prisma.user.update({
       where: { id: user.id },
@@ -75,9 +64,10 @@ function makeRef(prefix) {
          Math.random().toString(36).slice(2, 6).toUpperCase();
 }
 
-// ── WORKERS CRUD ──────────────────────────────────────────────────────
+// ============================================================
+// WORKERS CRUD (unchanged)
+// ============================================================
 
-// List workers
 router.get('/workers', auth, async (req, res) => {
   try {
     const payroll = await getPayrollAccount(req);
@@ -111,17 +101,14 @@ router.get('/workers', auth, async (req, res) => {
   }
 });
 
-// Add worker
 router.post('/workers', auth, async (req, res) => {
   try {
     const payroll = await getPayrollAccount(req);
     if (!payroll) return res.status(403).json({ error: 'Payroll access only' });
 
-    const {
-      fullName, role, category, department, email, phone,
+    const { fullName, role, category, department, email, phone,
       monthlySalary, bankName, bankRoutingNumber, bankAccountNumber,
-      photoUrl, notes,
-    } = req.body;
+      photoUrl, notes } = req.body;
 
     if (!fullName || !role) {
       return res.status(400).json({ error: 'Full name and role are required' });
@@ -130,8 +117,7 @@ router.post('/workers', auth, async (req, res) => {
     const worker = await prisma.worker.create({
       data: {
         payrollUserId: req.userId,
-        fullName,
-        role,
+        fullName, role,
         category: category || 'STAFF',
         department: department || 'General',
         email: email || null,
@@ -153,7 +139,6 @@ router.post('/workers', auth, async (req, res) => {
   }
 });
 
-// Edit worker
 router.put('/workers/:id', auth, async (req, res) => {
   try {
     const payroll = await getPayrollAccount(req);
@@ -185,7 +170,6 @@ router.put('/workers/:id', auth, async (req, res) => {
   }
 });
 
-// Soft delete worker
 router.delete('/workers/:id', auth, async (req, res) => {
   try {
     const payroll = await getPayrollAccount(req);
@@ -206,9 +190,11 @@ router.delete('/workers/:id', auth, async (req, res) => {
   }
 });
 
-// ── SINGLE PAYMENT ────────────────────────────────────────────────────
+// ============================================================
+// SINGLE PAYMENT — Step 1: initiate
+// ============================================================
 
-router.post('/pay', auth, async (req, res) => {
+router.post('/pay/initiate', auth, async (req, res) => {
   try {
     const payroll = await getPayrollAccount(req);
     if (!payroll) return res.status(403).json({ error: 'Payroll access only' });
@@ -233,19 +219,109 @@ router.post('/pay', auth, async (req, res) => {
       });
     }
 
+    // Generate OTP + store pending action
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MIN * 60 * 1000);
+
+    await prisma.pendingAction.deleteMany({
+      where: { userId: req.userId, type: 'PAYROLL_SINGLE' }
+    });
+
+    const action = await prisma.pendingAction.create({
+      data: {
+        userId: req.userId,
+        type: 'PAYROLL_SINGLE',
+        payload: JSON.stringify({
+          workerId,
+          workerName: worker.fullName,
+          amount: Number(amount),
+          category: category || 'SALARY',
+          description: description || null,
+        }),
+        otp,
+        otpExpiry,
+      }
+    });
+
+    const recipient = process.env.DEMO_EMAIL || payroll.user.email;
+    const masked = recipient.replace(/^(.{2}).*@/, '$1***@');
+
+    sendOtpEmail(recipient, otp, payroll.user.fullName)
+      .then(() => console.log(`[PAYROLL-OTP] Sent to ${recipient}`))
+      .catch(err => console.error('[PAYROLL-OTP] Failed:', err.message));
+
+    res.json({
+      success: true,
+      otpRequired: true,
+      pendingId: action.id,
+      destination: masked,
+      expiresIn: OTP_EXPIRY_MIN * 60,
+      message: `A 6-digit verification code has been sent to ${masked}.`,
+    });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Payment initiation failed' });
+  }
+});
+
+// ============================================================
+// SINGLE PAYMENT — Step 2: confirm
+// ============================================================
+
+router.post('/pay/confirm', auth, async (req, res) => {
+  try {
+    const payroll = await getPayrollAccount(req);
+    if (!payroll) return res.status(403).json({ error: 'Payroll access only' });
+
+    const { pendingId, otp } = req.body;
+    if (!pendingId) return res.status(400).json({ error: 'Missing pending transaction' });
+    if (!otp) return res.status(400).json({ error: 'Verification code required' });
+
+    const action = await prisma.pendingAction.findUnique({ where: { id: pendingId } });
+    if (!action || action.userId !== req.userId || action.type !== 'PAYROLL_SINGLE') {
+      return res.status(404).json({ error: 'Transaction not found or expired' });
+    }
+    if (new Date() > action.otpExpiry) {
+      await prisma.pendingAction.delete({ where: { id: action.id } });
+      return res.status(400).json({ error: 'Verification code expired. Please try again.' });
+    }
+    if (action.attempts >= OTP_MAX_ATTEMPTS) {
+      await prisma.pendingAction.delete({ where: { id: action.id } });
+      return res.status(403).json({ error: 'Too many attempts. Transaction cancelled.' });
+    }
+    if (action.otp !== otp.trim()) {
+      await prisma.pendingAction.update({
+        where: { id: action.id },
+        data: { attempts: action.attempts + 1 }
+      });
+      const remaining = OTP_MAX_ATTEMPTS - (action.attempts + 1);
+      return res.status(401).json({
+        error: `Incorrect verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`
+      });
+    }
+
+    const { workerId, amount, category, description } = JSON.parse(action.payload);
+
+    const worker = await prisma.worker.findUnique({ where: { id: workerId } });
+    if (!worker) return res.status(404).json({ error: 'Worker not found' });
+
+    const available = Number(payroll.balance) - Number(payroll.pendingOut || 0);
+    if (available < amount) {
+      await prisma.pendingAction.delete({ where: { id: action.id } });
+      return res.status(400).json({ error: 'Insufficient funds.' });
+    }
+
     const reference = makeRef('PR');
     const payCategory = category || 'SALARY';
     const desc = description || `${payCategory.toLowerCase()} payment`;
 
-    // Create the transaction + payroll record in one atomic operation
     const result = await prisma.$transaction(async (tx) => {
-      // Debit payroll via pendingOut
       const updatedPayroll = await tx.account.update({
         where: { id: payroll.id },
         data: { pendingOut: { increment: amount } },
       });
 
-      // Create bank transaction record
       const txn = await tx.transaction.create({
         data: {
           reference,
@@ -262,7 +338,6 @@ router.post('/pay', auth, async (req, res) => {
         }
       });
 
-      // Create payroll payment record (shows SUCCESS immediately on payroll board)
       const payment = await tx.payrollPayment.create({
         data: {
           reference,
@@ -291,6 +366,8 @@ router.post('/pay', auth, async (req, res) => {
       { reference, amount, status: 'SUCCESS' }
     );
 
+    await prisma.pendingAction.delete({ where: { id: action.id } });
+
     res.json({
       success: true,
       payment: {
@@ -308,21 +385,21 @@ router.post('/pay', auth, async (req, res) => {
       }
     });
   } catch (err) {
-    if (err.status) return res.status(err.status).json({ error: err.message });
     console.error(err);
-    res.status(500).json({ error: 'Payment failed' });
+    res.status(500).json({ error: 'Payment confirmation failed' });
   }
 });
 
-// ── BATCH PAYMENT ─────────────────────────────────────────────────────
+// ============================================================
+// BATCH PAYMENT — Step 1: initiate
+// ============================================================
 
-router.post('/batch', auth, async (req, res) => {
+router.post('/batch/initiate', auth, async (req, res) => {
   try {
     const payroll = await getPayrollAccount(req);
     if (!payroll) return res.status(403).json({ error: 'Payroll access only' });
 
     const { payments, pin } = req.body;
-
     if (!Array.isArray(payments) || payments.length === 0) {
       return res.status(400).json({ error: 'No payments provided' });
     }
@@ -330,7 +407,6 @@ router.post('/batch', auth, async (req, res) => {
 
     await checkPinWithLockout(payroll, pin);
 
-    // Load workers
     const workerIds = payments.map(p => p.workerId);
     const workers = await prisma.worker.findMany({
       where: { id: { in: workerIds }, payrollUserId: req.userId, isActive: true },
@@ -345,34 +421,128 @@ router.post('/batch', auth, async (req, res) => {
       });
     }
 
+    // Generate OTP + store pending batch
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MIN * 60 * 1000);
+
+    await prisma.pendingAction.deleteMany({
+      where: { userId: req.userId, type: 'PAYROLL_BATCH' }
+    });
+
+    // Enrich payments with worker info for the payload
+    const enriched = payments
+      .filter(p => workerMap.has(p.workerId))
+      .map(p => {
+        const w = workerMap.get(p.workerId);
+        return {
+          workerId: p.workerId,
+          workerName: w.fullName,
+          workerRole: w.role,
+          workerBank: w.bankName,
+          amount: Number(p.amount),
+          category: p.category || 'SALARY',
+          description: p.description || `${(p.category || 'SALARY').toLowerCase()} payment`,
+        };
+      });
+
+    const action = await prisma.pendingAction.create({
+      data: {
+        userId: req.userId,
+        type: 'PAYROLL_BATCH',
+        payload: JSON.stringify({ payments: enriched, total }),
+        otp,
+        otpExpiry,
+      }
+    });
+
+    const recipient = process.env.DEMO_EMAIL || payroll.user.email;
+    const masked = recipient.replace(/^(.{2}).*@/, '$1***@');
+
+    sendOtpEmail(recipient, otp, payroll.user.fullName)
+      .then(() => console.log(`[PAYROLL-BATCH-OTP] Sent to ${recipient}`))
+      .catch(err => console.error('[PAYROLL-BATCH-OTP] Failed:', err.message));
+
+    res.json({
+      success: true,
+      otpRequired: true,
+      pendingId: action.id,
+      count: enriched.length,
+      total,
+      destination: masked,
+      expiresIn: OTP_EXPIRY_MIN * 60,
+      message: `A 6-digit code has been sent to ${masked} to authorise ${enriched.length} payments.`,
+    });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Batch initiation failed' });
+  }
+});
+
+// ============================================================
+// BATCH PAYMENT — Step 2: confirm
+// ============================================================
+
+router.post('/batch/confirm', auth, async (req, res) => {
+  try {
+    const payroll = await getPayrollAccount(req);
+    if (!payroll) return res.status(403).json({ error: 'Payroll access only' });
+
+    const { pendingId, otp } = req.body;
+    if (!pendingId) return res.status(400).json({ error: 'Missing pending batch' });
+    if (!otp) return res.status(400).json({ error: 'Verification code required' });
+
+    const action = await prisma.pendingAction.findUnique({ where: { id: pendingId } });
+    if (!action || action.userId !== req.userId || action.type !== 'PAYROLL_BATCH') {
+      return res.status(404).json({ error: 'Batch not found or expired' });
+    }
+    if (new Date() > action.otpExpiry) {
+      await prisma.pendingAction.delete({ where: { id: action.id } });
+      return res.status(400).json({ error: 'Verification code expired.' });
+    }
+    if (action.attempts >= OTP_MAX_ATTEMPTS) {
+      await prisma.pendingAction.delete({ where: { id: action.id } });
+      return res.status(403).json({ error: 'Too many attempts. Batch cancelled.' });
+    }
+    if (action.otp !== otp.trim()) {
+      await prisma.pendingAction.update({
+        where: { id: action.id },
+        data: { attempts: action.attempts + 1 }
+      });
+      const remaining = OTP_MAX_ATTEMPTS - (action.attempts + 1);
+      return res.status(401).json({
+        error: `Incorrect verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`
+      });
+    }
+
+    const { payments, total } = JSON.parse(action.payload);
+
+    const available = Number(payroll.balance) - Number(payroll.pendingOut || 0);
+    if (available < total) {
+      await prisma.pendingAction.delete({ where: { id: action.id } });
+      return res.status(400).json({ error: 'Insufficient funds.' });
+    }
+
     const batchRef = makeRef('BT');
     const results = [];
 
     for (const p of payments) {
-      const worker = workerMap.get(p.workerId);
-      if (!worker) continue;
-
-      const amount = Number(p.amount);
-      if (!amount || amount <= 0) continue;
-
       const reference = makeRef('PR');
-      const category = p.category || 'SALARY';
-      const desc = p.description || `${category.toLowerCase()} payment`;
 
       await prisma.$transaction(async (tx) => {
         const updatedPayroll = await tx.account.update({
           where: { id: payroll.id },
-          data: { pendingOut: { increment: amount } },
+          data: { pendingOut: { increment: p.amount } },
         });
 
         const txn = await tx.transaction.create({
           data: {
             reference,
-            amount,
+            amount: p.amount,
             status: 'PENDING',
             type: 'PAYROLL',
-            category,
-            description: `${desc} — to ${worker.fullName} at ${worker.bankName || 'External Bank'} [BATCH ${batchRef}]`,
+            category: p.category,
+            description: `${p.description} — to ${p.workerName} at ${p.workerBank || 'External Bank'} [BATCH ${batchRef}]`,
             balanceAfter: updatedPayroll.balance,
             note: 'Batch payroll transfer — awaiting settlement.',
             isPending: true,
@@ -384,11 +554,11 @@ router.post('/batch', auth, async (req, res) => {
         const payment = await tx.payrollPayment.create({
           data: {
             reference,
-            workerId: worker.id,
+            workerId: p.workerId,
             payrollUserId: req.userId,
-            amount,
-            category,
-            description: `${desc} [Batch ${batchRef}]`,
+            amount: p.amount,
+            category: p.category,
+            description: `${p.description} [Batch ${batchRef}]`,
             status: 'SUCCESS',
             fromAccountId: payroll.id,
             transactionId: txn.id,
@@ -397,8 +567,8 @@ router.post('/batch', auth, async (req, res) => {
         });
 
         results.push({
-          worker: worker.fullName,
-          amount,
+          worker: p.workerName,
+          amount: p.amount,
           reference: payment.reference,
         });
       });
@@ -412,6 +582,8 @@ router.post('/batch', auth, async (req, res) => {
       { reference: batchRef, amount: total, status: 'SUCCESS' }
     );
 
+    await prisma.pendingAction.delete({ where: { id: action.id } });
+
     res.json({
       success: true,
       batchRef,
@@ -420,13 +592,14 @@ router.post('/batch', auth, async (req, res) => {
       payments: results,
     });
   } catch (err) {
-    if (err.status) return res.status(err.status).json({ error: err.message });
     console.error(err);
-    res.status(500).json({ error: 'Batch payment failed' });
+    res.status(500).json({ error: 'Batch confirmation failed' });
   }
 });
 
-// ── HISTORY ───────────────────────────────────────────────────────────
+// ============================================================
+// HISTORY
+// ============================================================
 
 router.get('/payments', auth, async (req, res) => {
   try {
@@ -434,7 +607,6 @@ router.get('/payments', auth, async (req, res) => {
     if (!payroll) return res.status(403).json({ error: 'Payroll access only' });
 
     const { category, workerId, limit = 200 } = req.query;
-
     const where = { payrollUserId: req.userId };
     if (category && category !== 'ALL') where.category = category;
     if (workerId) where.workerId = workerId;
@@ -471,7 +643,9 @@ router.get('/payments', auth, async (req, res) => {
   }
 });
 
-// ── STATS ─────────────────────────────────────────────────────────────
+// ============================================================
+// STATS
+// ============================================================
 
 router.get('/stats', auth, async (req, res) => {
   try {
@@ -481,14 +655,12 @@ router.get('/stats', auth, async (req, res) => {
     const workers = await prisma.worker.findMany({
       where: { payrollUserId: req.userId, isActive: true },
     });
-
     const payments = await prisma.payrollPayment.findMany({
       where: { payrollUserId: req.userId },
     });
 
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
     const thisMonth = payments.filter(p => new Date(p.paidAt) >= monthStart);
 
     const byCategory = {};
@@ -526,7 +698,9 @@ router.get('/stats', auth, async (req, res) => {
   }
 });
 
-// ── PAYSLIP PDF ───────────────────────────────────────────────────────
+// ============================================================
+// PAYSLIP PDF
+// ============================================================
 
 router.get('/payments/:id/payslip', auth, async (req, res) => {
   try {
@@ -537,7 +711,6 @@ router.get('/payments/:id/payslip', auth, async (req, res) => {
       where: { id: req.params.id },
       include: { worker: true },
     });
-
     if (!payment || payment.payrollUserId !== req.userId) {
       return res.status(404).json({ error: 'Payment not found' });
     }
@@ -553,7 +726,6 @@ router.get('/payments/:id/payslip', auth, async (req, res) => {
     const stamp = d => new Date(d).toLocaleDateString('en-US',
       { year:'numeric', month:'long', day:'2-digit' });
 
-    // Header
     doc.rect(0, 0, 595, 100).fill('#0f2b5b');
     doc.fillColor('#ffffff').fontSize(22).font('Helvetica-Bold')
        .text("ST. MARY'S ORPHANAGE", 50, 30);
@@ -562,7 +734,6 @@ router.get('/payments/:id/payslip', auth, async (req, res) => {
     doc.fontSize(8).text(`Reference: ${payment.reference}`, 50, 78);
     doc.text(`Issued: ${stamp(payment.paidAt)}`, 400, 78, { width: 150, align: 'right' });
 
-    // Employee info box
     doc.rect(50, 130, 495, 100).strokeColor('#d0d5dd').lineWidth(1).stroke();
     doc.fillColor('#0f2b5b').fontSize(9).font('Helvetica-Bold')
        .text('EMPLOYEE', 65, 145);
@@ -573,7 +744,6 @@ router.get('/payments/:id/payslip', auth, async (req, res) => {
        .text(w.department, 65, 196)
        .text(w.email || '', 65, 210);
 
-    // Payment details
     doc.fillColor('#0f2b5b').fontSize(9).font('Helvetica-Bold')
        .text('PAYMENT', 330, 145);
     doc.fillColor('#111').fontSize(22).font('Helvetica-Bold')
@@ -582,7 +752,6 @@ router.get('/payments/:id/payslip', auth, async (req, res) => {
        .text(`Category: ${payment.category}`, 330, 195)
        .text(`Paid: ${stamp(payment.paidAt)}`, 330, 210);
 
-    // Bank details
     doc.rect(50, 250, 495, 90).strokeColor('#d0d5dd').stroke();
     doc.fillColor('#0f2b5b').fontSize(9).font('Helvetica-Bold')
        .text('PAID TO BANK ACCOUNT', 65, 265);
@@ -592,21 +761,18 @@ router.get('/payments/:id/payslip', auth, async (req, res) => {
        .text(`Routing: ${w.bankRoutingNumber || '—'}`, 330, 285)
        .text(`Account holder: ${w.fullName}`, 330, 305);
 
-    // Description
     doc.rect(50, 360, 495, 60).fill('#f4f6fa');
     doc.fillColor('#0f2b5b').fontSize(9).font('Helvetica-Bold')
        .text('DESCRIPTION', 65, 375);
     doc.fillColor('#333').fontSize(10).font('Helvetica')
        .text(payment.description || '—', 65, 395, { width: 460 });
 
-    // Signature block
     doc.fillColor('#555').fontSize(9).font('Helvetica')
        .text('Approved by:', 50, 460)
        .text('____________________________', 50, 485)
        .text('Payroll Officer', 50, 500)
        .text('St. Mary\'s Orphanage — Payroll Department', 50, 515);
 
-    // Footer
     doc.fillColor('#777').fontSize(8).font('Helvetica')
        .text(
          `Continental Federal Bank & Trust · ${bankConfig.routingNumber} · This payslip is computer-generated.`,

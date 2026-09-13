@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../api';
 
@@ -12,16 +12,28 @@ const CATEGORIES = [
 ];
 
 export default function PayrollBatch() {
-  const { token, accounts } = useAuth();
+  const { token, accounts, refreshAccounts } = useAuth();
   const [workers, setWorkers] = useState([]);
-  const [selected, setSelected] = useState({});          // id -> amount
+  const [selected, setSelected] = useState({});
   const [category, setCategory] = useState('SALARY');
   const [description, setDescription] = useState('');
   const [search, setSearch] = useState('');
+
+  // Step 1 — PIN
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
+
+  // Step 2 — OTP
+  const [showOtp, setShowOtp] = useState(false);
+  const [pendingId, setPendingId] = useState('');
+  const [otpDestination, setOtpDestination] = useState('');
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [otpError, setOtpError] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const otpRefs = useRef([]);
+
   const [result, setResult] = useState(null);
 
   const payrollAccount = accounts.find(a => a.accountType === 'payroll');
@@ -34,20 +46,26 @@ export default function PayrollBatch() {
     apiFetch('/payroll/workers', {}, token).then(setWorkers).catch(() => {});
   }, [token]);
 
-  // Selection helpers
   const toggle = (w) => {
     const next = { ...selected };
-    if (next[w.id] !== undefined) {
-      delete next[w.id];
-    } else {
-      next[w.id] = w.monthlySalary || 0;
-    }
+    if (next[w.id] !== undefined) delete next[w.id];
+    else next[w.id] = w.monthlySalary || 0;
     setSelected(next);
   };
 
   const setAmount = (id, val) => {
     setSelected({ ...selected, [id]: Number(val) });
   };
+
+  const filtered = workers.filter(w => {
+    if (!search.trim()) return true;
+    const s = search.toLowerCase();
+    return (
+      w.fullName.toLowerCase().includes(s) ||
+      w.role.toLowerCase().includes(s) ||
+      w.department.toLowerCase().includes(s)
+    );
+  });
 
   const selectAll = () => {
     const next = {};
@@ -65,32 +83,23 @@ export default function PayrollBatch() {
     setSelected(next);
   };
 
-  const filtered = workers.filter(w => {
-    if (!search.trim()) return true;
-    const s = search.toLowerCase();
-    return (
-      w.fullName.toLowerCase().includes(s) ||
-      w.role.toLowerCase().includes(s) ||
-      w.department.toLowerCase().includes(s)
-    );
-  });
-
   const selectedIds = Object.keys(selected);
   const totalAmount = Object.values(selected).reduce((s, v) => s + Number(v || 0), 0);
   const available = Number(payrollAccount?.available ?? payrollAccount?.balance ?? 0);
 
   const initiate = () => {
-    setErr('');
-    if (selectedIds.length === 0) return setErr('Select at least one worker.');
-    if (totalAmount <= 0) return setErr('Enter amounts for selected workers.');
+    setPinError('');
+    if (selectedIds.length === 0) return setPinError('Select at least one worker.');
+    if (totalAmount <= 0) return setPinError('Enter amounts for selected workers.');
     if (totalAmount > available) {
-      return setErr(`Insufficient funds. Total needed ${money(totalAmount)}, available ${money(available)}`);
+      return setPinError(`Insufficient funds. Total needed ${money(totalAmount)}, available ${money(available)}`);
     }
+    setPin('');
     setShowPin(true);
   };
 
-  const confirm = async () => {
-    setErr(''); setLoading(true);
+  const submitPin = async () => {
+    setPinError(''); setPinLoading(true);
     try {
       const payments = selectedIds.map(id => ({
         workerId: id,
@@ -99,20 +108,62 @@ export default function PayrollBatch() {
         description: description || `${category.toLowerCase()} payment`,
       }));
 
-      const res = await apiFetch('/payroll/batch', {
+      const res = await apiFetch('/payroll/batch/initiate', {
         method: 'POST',
         body: JSON.stringify({ payments, pin }),
       }, token);
 
+      setPendingId(res.pendingId);
+      setOtpDestination(res.destination || '');
       setShowPin(false);
-      setResult(res);
+      setOtp(['', '', '', '', '', '']);
+      setOtpError('');
+      setShowOtp(true);
       setPin('');
+      setTimeout(() => otpRefs.current[0]?.focus(), 150);
+    } catch (e) {
+      setPinError(e.message || 'Batch initiation failed');
+    } finally {
+      setPinLoading(false);
+    }
+  };
+
+  const handleOtpChange = (idx, val) => {
+    const v = val.replace(/\D/g, '').slice(0, 1);
+    const next = [...otp];
+    next[idx] = v;
+    setOtp(next);
+    if (v && idx < 5) otpRefs.current[idx + 1]?.focus();
+  };
+
+  const handleOtpKey = (idx, e) => {
+    if (e.key === 'Backspace' && !otp[idx] && idx > 0) {
+      otpRefs.current[idx - 1]?.focus();
+    }
+  };
+
+  const confirmOtp = async () => {
+    const code = otp.join('');
+    if (code.length !== 6) return setOtpError('Enter the 6-digit code');
+    setOtpError(''); setOtpLoading(true);
+    try {
+      const res = await apiFetch('/payroll/batch/confirm', {
+        method: 'POST',
+        body: JSON.stringify({ pendingId, otp: code }),
+      }, token);
+      setShowOtp(false);
+      setResult(res);
+      setOtp(['', '', '', '', '', '']);
       setSelected({});
       setDescription('');
+      if (refreshAccounts) {
+        const fresh = await apiFetch('/accounts', {}, token);
+        refreshAccounts(fresh);
+      }
     } catch (e) {
-      setErr(e.message || 'Batch payment failed');
+      setOtpError(e.message || 'Verification failed');
     } finally {
-      setLoading(false);
+      setOtpLoading(false);
     }
   };
 
@@ -122,11 +173,10 @@ export default function PayrollBatch() {
         <p className="text-xs font-bold tracking-[.2em] text-gray-400 uppercase">Payroll</p>
         <h1 className="font-serif text-3xl text-[#0f2b5b] mt-1">Batch Payment</h1>
         <p className="text-gray-500 text-sm mt-1">
-          Pay multiple workers in one submission — single PIN authorises all
+          Pay multiple workers in one submission — single PIN + OTP authorises all
         </p>
       </div>
 
-      {/* Category + Description bar */}
       <div className="card p-5 mb-6">
         <div className="grid md:grid-cols-2 gap-4">
           <div>
@@ -143,28 +193,19 @@ export default function PayrollBatch() {
             <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
               Description (optional)
             </label>
-            <input
-              value={description}
-              onChange={e => setDescription(e.target.value)}
+            <input value={description} onChange={e => setDescription(e.target.value)}
               className="field"
-              placeholder={`${category.toLowerCase()} for all selected workers`}
-            />
+              placeholder={`${category.toLowerCase()} for all selected`} />
           </div>
         </div>
       </div>
 
-      {/* Selection toolbar */}
       <div className="card p-4 mb-4">
         <div className="flex flex-wrap gap-3 items-center justify-between">
           <div className="flex-1 min-w-[200px] flex items-center gap-2 border border-gray-300 rounded-md px-3 py-2">
             <span className="text-gray-400">🔍</span>
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search workers..."
-              className="flex-1 outline-none text-sm bg-transparent"
-            />
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search workers..." className="flex-1 outline-none text-sm bg-transparent" />
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -188,21 +229,14 @@ export default function PayrollBatch() {
         </div>
       </div>
 
-      {/* Workers list */}
       <div className="card p-2 max-h-[500px] overflow-y-auto mb-4">
         {filtered.map(w => {
           const isSelected = selected[w.id] !== undefined;
           return (
             <div key={w.id}
-              className={`flex items-center gap-3 p-3 rounded-lg transition ${
-                isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
-              }`}>
-              <input
-                type="checkbox"
-                checked={isSelected}
-                onChange={() => toggle(w)}
-                className="w-5 h-5 accent-[#0f2b5b] cursor-pointer flex-shrink-0"
-              />
+              className={`flex items-center gap-3 p-3 rounded-lg transition ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+              <input type="checkbox" checked={isSelected} onChange={() => toggle(w)}
+                className="w-5 h-5 accent-[#0f2b5b] cursor-pointer flex-shrink-0" />
 
               {w.photoUrl ? (
                 <img src={w.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
@@ -221,15 +255,13 @@ export default function PayrollBatch() {
 
               <div className="flex items-center gap-2 flex-shrink-0">
                 <span className="text-xs text-gray-400">$</span>
-                <input
-                  type="number"
+                <input type="number"
                   value={isSelected ? selected[w.id] : ''}
                   onChange={e => setAmount(w.id, e.target.value)}
                   onFocus={() => { if (!isSelected) toggle(w); }}
                   className="w-24 text-right text-sm font-semibold px-2 py-1.5 border border-gray-300 rounded-md outline-none focus:border-[#0f2b5b]"
                   placeholder={String(w.monthlySalary || 0)}
-                  disabled={!isSelected}
-                />
+                  disabled={!isSelected} />
               </div>
             </div>
           );
@@ -240,7 +272,6 @@ export default function PayrollBatch() {
         )}
       </div>
 
-      {/* Summary bar */}
       <div className="card p-5 bg-gradient-to-br from-[#0f2b5b] to-[#0a2148] text-white sticky bottom-4">
         <div className="grid md:grid-cols-4 gap-4 items-center">
           <div>
@@ -256,8 +287,7 @@ export default function PayrollBatch() {
             <p className="text-xl font-bold text-green-300">{money(available)}</p>
           </div>
           <div className="text-right">
-            <button
-              onClick={initiate}
+            <button onClick={initiate}
               disabled={selectedIds.length === 0 || totalAmount > available}
               className="px-8 py-3 bg-[#c9a227] hover:bg-[#a8861f] text-[#0f2b5b] font-bold rounded-md transition disabled:opacity-40">
               Submit Batch →
@@ -270,44 +300,88 @@ export default function PayrollBatch() {
       {showPin && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
-            <h3 className="font-serif text-xl text-[#0f2b5b] mb-1">Confirm Batch Payment</h3>
+            <h3 className="font-serif text-xl text-[#0f2b5b] mb-1">Step 1 of 2 — Payroll PIN</h3>
             <p className="text-sm text-gray-500 mb-5">
-              Authorise {selectedIds.length} payments with your 4-digit PIN
+              Authorise {selectedIds.length} payments with your PIN
             </p>
 
             <div className="text-center font-serif text-3xl font-bold text-[#0f2b5b] mb-5">
               {money(totalAmount)}
             </div>
 
-            {err && (
+            {pinError && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm mb-4">
-                {err}
+                {pinError}
               </div>
             )}
 
-            <input
-              type="password"
-              maxLength={4}
-              value={pin}
+            <input type="password" maxLength={4} value={pin}
               onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
-              className="w-full text-center text-2xl tracking-[1em] font-mono px-4 py-4 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0f2b5b] focus:border-transparent outline-none"
-              placeholder="••••"
-              autoFocus
-            />
+              className="w-full text-center text-2xl tracking-[1em] font-mono px-4 py-4 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0f2b5b] outline-none"
+              placeholder="••••" autoFocus />
 
             <div className="flex gap-3 mt-5">
-              <button
-                onClick={() => { setShowPin(false); setPin(''); setErr(''); }}
+              <button onClick={() => { setShowPin(false); setPin(''); setPinError(''); }}
                 className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-md transition">
                 Cancel
               </button>
-              <button
-                onClick={confirm}
-                disabled={loading || pin.length !== 4}
+              <button onClick={submitPin} disabled={pinLoading || pin.length !== 4}
                 className="btn-primary flex-1 disabled:opacity-50">
-                {loading ? 'Processing…' : 'Confirm Batch'}
+                {pinLoading ? 'Sending OTP…' : 'Send OTP'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* OTP MODAL */}
+      {showOtp && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+            <div className="text-center mb-4">
+              <div className="w-14 h-14 rounded-full bg-blue-50 grid place-items-center mx-auto mb-3">
+                <span className="text-3xl">🔐</span>
+              </div>
+              <h3 className="font-serif text-xl text-[#0f2b5b]">Step 2 of 2 — Verify</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                A 6-digit code has been sent to <strong>{otpDestination}</strong>
+              </p>
+            </div>
+
+            <div className="text-center text-xs text-gray-500 mb-5 bg-gray-50 rounded-md py-2 px-3">
+              Authorising <strong>{money(totalAmount)}</strong> for {selectedIds.length} workers
+            </div>
+
+            {otpError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm mb-4">
+                {otpError}
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-center mb-5">
+              {otp.map((digit, idx) => (
+                <input key={idx} ref={el => otpRefs.current[idx] = el}
+                  type="text" inputMode="numeric" maxLength={1} value={digit}
+                  onChange={e => handleOtpChange(idx, e.target.value)}
+                  onKeyDown={e => handleOtpKey(idx, e)}
+                  className="w-10 h-12 text-center text-xl font-bold border border-gray-300 rounded-md focus:border-[#0f2b5b] focus:ring-2 focus:ring-[#0f2b5b]/20 outline-none" />
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => { setShowOtp(false); setOtp(['','','','','','']); setOtpError(''); }}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-md transition">
+                Cancel
+              </button>
+              <button onClick={confirmOtp} disabled={otpLoading || otp.join('').length !== 6}
+                className="btn-primary flex-1 disabled:opacity-50">
+                {otpLoading ? 'Verifying…' : 'Confirm Batch'}
+              </button>
+            </div>
+
+            <p className="text-center text-xs text-gray-400 mt-4">
+              Code expires in 10 minutes.
+            </p>
           </div>
         </div>
       )}
@@ -337,8 +411,7 @@ export default function PayrollBatch() {
               ))}
             </div>
 
-            <button onClick={() => setResult(null)}
-              className="btn-primary w-full">
+            <button onClick={() => setResult(null)} className="btn-primary w-full">
               Done
             </button>
           </div>

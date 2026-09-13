@@ -8,6 +8,9 @@ export default function Receipt({ receipt, onClose }) {
   const buildText = () => {
     const fromRouting = receipt.from.routing ? `\nRouting   : ${receipt.from.routing}` : '';
     const toRouting   = receipt.to.routing   ? `\nRouting   : ${receipt.to.routing}`   : '';
+    const networkLine = receipt.network
+      ? `\nNetwork   : ${receipt.network.network}\nSettlement: ${receipt.network.settlementTime}`
+      : '';
     return `════════════════════════════
    CONTINENTAL FEDERAL BANK & TRUST
         TRANSFER RECEIPT
@@ -24,7 +27,7 @@ Bank      : ${receipt.from.bank}
 TO
 Name      : ${receipt.to.name}
 Account   : ${receipt.to.account}${toRouting}
-Bank      : ${receipt.to.bank}
+Bank      : ${receipt.to.bank}${networkLine}
 
 ────────────────────────────
 AMOUNT    : ${money(receipt.amount)}
@@ -97,7 +100,7 @@ Member FDIC · Est. 1989
             ✈️ Telegram
           </button>
           <button onClick={shareIMessage}
-            className="bg-[#0a84ff] hover:brightness-110 text-white font-bold rounded-md transition text-sm py-3">
+            className="bg-[#0a84ff] hover:brightness-110 text-white font-bold py-3 rounded-md transition text-sm">
             ✉️ iMessage
           </button>
           <button onClick={shareEmail}

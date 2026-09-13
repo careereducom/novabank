@@ -1,8 +1,10 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const prisma = new PrismaClient();
 
 // ============================================================
-// ACCOUNTS
+// REGISTERED ACCOUNTS
+// Realistic 10-digit account numbers + random 4-digit PINs
 // ============================================================
 const ACCOUNTS = [
   {
@@ -10,23 +12,22 @@ const ACCOUNTS = [
     name:'ALEXANDER REYES — PRIVATE CLIENT',
     type:'premium', biz:true,
     target: 87342918.47,
-    code:'0123',
+    code:'7492',
     city:'New York, NY, USA',
     flagship:true,
   },
-  { acc:'7428591036', name:'ANDERSON HOLDINGS LLC', type:'business', biz:false, target: 483216.92, code:'1111', city:'New York, NY, USA' },
-  { acc:'3157264980', name:'JAMES ANDERSON',        type:'premium',  biz:false, target: 374821.55, code:'1234', city:'Boston, MA, USA' },
-  { acc:'8364201759', name:'MARIA GONZALEZ',        type:'savings',  biz:false, target: 421093.28, code:'2345', city:'Mexico City, MX' },
-  { acc:'5691038274', name:'MICHAEL CHEN',          type:'checking', biz:false, target: 312847.61, code:'3456', city:'San Francisco, CA, USA' },
-  { acc:'2748519306', name:'SOPHIE TREMBLAY',       type:'premium',  biz:false, target: 285419.73, code:'4567', city:'Montreal, QC, Canada' },
-  { acc:'9184670325', name:'CARLOS RODRIGUEZ',      type:'checking', biz:false, target: 195328.14, code:'5678', city:'Guadalajara, MX' },
-  { acc:'6529318470', name:'EMILY WATSON',          type:'savings',  biz:false, target: 240781.96, code:'6789', city:'Chicago, IL, USA' },
-  { acc:'3975026814', name:'LIAM OCONNOR',          type:'checking', biz:false, target: 175264.38, code:'7890', city:'Toronto, ON, Canada' },
-  { acc:'8251749036', name:'ANA MARTINEZ',          type:'savings',  biz:false, target: 165472.89, code:'8901', city:'Monterrey, MX' },
-
-  // Payroll account — orphanage company
-  { acc:'7319245680', name:"ST. MARY'S ORPHANAGE — PAYROLL", type:'payroll', biz:true, target: 450000.00, code:'4567', city:'New York, NY, USA', payroll:true },
+  { acc:'7428591036', name:'ANDERSON HOLDINGS LLC', type:'business', biz:false, target: 483216.92, code:'3164', city:'New York, NY, USA' },
+  { acc:'3157264980', name:'JAMES ANDERSON',        type:'premium',  biz:false, target: 374821.55, code:'8507', city:'Boston, MA, USA' },
+  { acc:'8364201759', name:'MARIA GONZALEZ',        type:'savings',  biz:false, target: 421093.28, code:'2913', city:'Mexico City, MX' },
+  { acc:'5691038274', name:'MICHAEL CHEN',          type:'checking', biz:false, target: 312847.61, code:'6481', city:'San Francisco, CA, USA' },
+  { acc:'2748519306', name:'SOPHIE TREMBLAY',       type:'premium',  biz:false, target: 285419.73, code:'5629', city:'Montreal, QC, Canada' },
+  { acc:'9184670325', name:'CARLOS RODRIGUEZ',      type:'checking', biz:false, target: 195328.14, code:'7803', city:'Guadalajara, MX' },
+  { acc:'6529318470', name:'EMILY WATSON',          type:'savings',  biz:false, target: 240781.96, code:'4172', city:'Chicago, IL, USA' },
+  { acc:'3975026814', name:'LIAM OCONNOR',          type:'checking', biz:false, target: 175264.38, code:'9358', city:'Toronto, ON, Canada' },
+  { acc:'8251749036', name:'ANA MARTINEZ',          type:'savings',  biz:false, target: 165472.89, code:'1046', city:'Monterrey, MX' },
+  { acc:'7319245680', name:"ST. MARY'S ORPHANAGE — PAYROLL", type:'payroll', biz:true, target: 450000.00, code:'6284', city:'New York, NY, USA', payroll:true },
 ];
+
 const SUBSCRIPTIONS = [
   { name:'Netflix Premium',        min: 22.99, max: 22.99, entity:'Netflix Inc., Los Gatos, CA' },
   { name:'Spotify Family',         min: 16.99, max: 16.99, entity:'Spotify AB, Stockholm, SE' },
@@ -153,7 +154,7 @@ function generateHistory(account, isBusiness) {
       const d = new Date(year, 11, 31);
       if (ok(d)) {
         const div = isBusiness ? rand(250000, 1800000) : rand(800, 6500);
-        txns.push({ type:'DIVIDEND', category:'INVESTMENT', description:'Year-end dividend — Anderson Holdings LLC', amount: money(div), direction:'IN', date: d });
+        txns.push({ type:'DIVIDEND', category:'INVESTMENT', description:'Year-end dividend', amount: money(div), direction:'IN', date: d });
       }
     }
 
@@ -168,25 +169,6 @@ function computeOpening(target, txns) {
   return money(target - net);
 }
 
-// ============================================================
-// Prisma client with reconnect helper
-// ============================================================
-let prisma = new PrismaClient({
-  log: [],
-  datasources: { db: { url: process.env.DATABASE_URL } },
-});
-
-async function reconnect() {
-  try { await prisma.$disconnect(); } catch {}
-  prisma = new PrismaClient({
-    log: [],
-    datasources: { db: { url: process.env.DATABASE_URL } },
-  });
-}
-
-// ============================================================
-// Small-batch insert with reconnect
-// ============================================================
 async function insertBatches(records, batchSize = 50) {
   const total = records.length;
   let inserted = 0;
@@ -202,8 +184,6 @@ async function insertBatches(records, batchSize = 50) {
         ok = true;
         break;
       } catch (e) {
-        // Reconnect on any failure
-        try { await reconnect(); } catch {}
         await sleep(2000 + tries * 500);
       }
     }
@@ -216,8 +196,7 @@ async function insertBatches(records, batchSize = 50) {
       }
       await sleep(100);
     } else {
-      // Skip this batch and move on
-      console.log('\n    ⚠ skipped batch at ' + i);
+      console.log('\n    skipped batch at ' + i);
       i += batchSize;
     }
   }
@@ -230,11 +209,18 @@ async function main() {
   console.log('Initializing Continental Federal Bank ledger...\n');
 
   console.log('Clearing existing data...');
+  await prisma.notification.deleteMany({});
+  await prisma.pendingAction.deleteMany({});
+  await prisma.payrollPayment.deleteMany({});
+  await prisma.worker.deleteMany({});
   await prisma.transaction.deleteMany({});
   await prisma.billPayment.deleteMany({});
   await prisma.deposit.deleteMany({});
   await prisma.card.deleteMany({});
   await prisma.auditLog.deleteMany({});
+  await prisma.payrollPayment.deleteMany({});
+  await prisma.worker.deleteMany({});
+  await prisma.pendingAction.deleteMany({});
   await prisma.account.deleteMany({});
   await prisma.user.deleteMany({});
   console.log('Cleared.\n');

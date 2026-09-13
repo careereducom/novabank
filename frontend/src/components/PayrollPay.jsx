@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../api';
 
@@ -13,17 +13,29 @@ const CATEGORIES = [
 ];
 
 export default function PayrollPay() {
-  const { token, accounts } = useAuth();
+  const { token, accounts, refreshAccounts } = useAuth();
   const [workers, setWorkers] = useState([]);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('SALARY');
   const [description, setDescription] = useState('');
+
+  // Step 1 — PIN
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
-  const [err, setErr] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [pinError, setPinError] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
+
+  // Step 2 — OTP
+  const [showOtp, setShowOtp] = useState(false);
+  const [pendingId, setPendingId] = useState('');
+  const [otpDestination, setOtpDestination] = useState('');
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [otpError, setOtpError] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const otpRefs = useRef([]);
+
   const [receipt, setReceipt] = useState(null);
 
   const payrollAccount = accounts.find(a => a.accountType === 'payroll');
@@ -43,20 +55,21 @@ export default function PayrollPay() {
   });
 
   const initiate = () => {
-    setErr('');
-    if (!selected) return setErr('Select a worker first.');
-    if (!amount || Number(amount) <= 0) return setErr('Enter a valid amount.');
+    setPinError('');
+    if (!selected) return setPinError('Select a worker first.');
+    if (!amount || Number(amount) <= 0) return setPinError('Enter a valid amount.');
     const available = Number(payrollAccount?.available ?? payrollAccount?.balance ?? 0);
     if (Number(amount) > available) {
-      return setErr(`Insufficient funds. Available: ${money(available)}`);
+      return setPinError(`Insufficient funds. Available: ${money(available)}`);
     }
+    setPin('');
     setShowPin(true);
   };
 
-  const confirm = async () => {
-    setErr(''); setLoading(true);
+  const submitPin = async () => {
+    setPinError(''); setPinLoading(true);
     try {
-      const res = await apiFetch('/payroll/pay', {
+      const res = await apiFetch('/payroll/pay/initiate', {
         method: 'POST',
         body: JSON.stringify({
           workerId: selected.id,
@@ -66,19 +79,59 @@ export default function PayrollPay() {
           pin,
         }),
       }, token);
+
+      setPendingId(res.pendingId);
+      setOtpDestination(res.destination || '');
       setShowPin(false);
-      setReceipt(res.payment);
+      setOtp(['', '', '', '', '', '']);
+      setOtpError('');
+      setShowOtp(true);
       setPin('');
+      setTimeout(() => otpRefs.current[0]?.focus(), 150);
+    } catch (e) {
+      setPinError(e.message || 'Payment initiation failed');
+    } finally {
+      setPinLoading(false);
+    }
+  };
+
+  const handleOtpChange = (idx, val) => {
+    const v = val.replace(/\D/g, '').slice(0, 1);
+    const next = [...otp];
+    next[idx] = v;
+    setOtp(next);
+    if (v && idx < 5) otpRefs.current[idx + 1]?.focus();
+  };
+
+  const handleOtpKey = (idx, e) => {
+    if (e.key === 'Backspace' && !otp[idx] && idx > 0) {
+      otpRefs.current[idx - 1]?.focus();
+    }
+  };
+
+  const confirmOtp = async () => {
+    const code = otp.join('');
+    if (code.length !== 6) return setOtpError('Enter the 6-digit code');
+    setOtpError(''); setOtpLoading(true);
+    try {
+      const res = await apiFetch('/payroll/pay/confirm', {
+        method: 'POST',
+        body: JSON.stringify({ pendingId, otp: code }),
+      }, token);
+      setShowOtp(false);
+      setReceipt(res.payment);
+      setOtp(['', '', '', '', '', '']);
       setAmount('');
       setDescription('');
       setSelected(null);
-      // Refresh accounts
-      const fresh = await apiFetch('/accounts', {}, token);
-      // update global accounts (if you have refreshAccounts available)
+      if (refreshAccounts) {
+        const fresh = await apiFetch('/accounts', {}, token);
+        refreshAccounts(fresh);
+      }
     } catch (e) {
-      setErr(e.message || 'Payment failed');
+      setOtpError(e.message || 'Verification failed');
     } finally {
-      setLoading(false);
+      setOtpLoading(false);
     }
   };
 
@@ -114,18 +167,12 @@ export default function PayrollPay() {
           </p>
           <div className="flex items-center gap-2 border border-gray-300 rounded-md px-3 py-2 mb-3">
             <span className="text-gray-400">🔍</span>
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search workers..."
-              className="flex-1 outline-none text-sm bg-transparent"
-            />
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search workers..." className="flex-1 outline-none text-sm bg-transparent" />
           </div>
           <div className="max-h-[420px] overflow-y-auto space-y-1">
             {filtered.map(w => (
-              <button
-                key={w.id}
+              <button key={w.id}
                 onClick={() => { setSelected(w); setAmount(w.monthlySalary || ''); }}
                 className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition ${
                   selected?.id === w.id ? 'bg-[#0f2b5b] text-white' : 'hover:bg-gray-50'
@@ -147,9 +194,7 @@ export default function PayrollPay() {
                   <p className={`text-xs font-bold ${selected?.id === w.id ? 'text-white' : 'text-gray-700'}`}>
                     {money(w.monthlySalary || 0)}
                   </p>
-                  <p className={`text-[10px] ${selected?.id === w.id ? 'text-blue-200' : 'text-gray-400'}`}>
-                    /month
-                  </p>
+                  <p className={`text-[10px] ${selected?.id === w.id ? 'text-blue-200' : 'text-gray-400'}`}>/month</p>
                 </div>
               </button>
             ))}
@@ -171,7 +216,6 @@ export default function PayrollPay() {
 
           {selected && (
             <div className="space-y-4">
-              {/* Selected worker banner */}
               <div className="bg-[#f4f6fa] rounded-lg p-4 flex items-center gap-3">
                 {selected.photoUrl ? (
                   <img src={selected.photoUrl} alt="" className="w-12 h-12 rounded-full object-cover" />
@@ -189,19 +233,13 @@ export default function PayrollPay() {
                 </div>
               </div>
 
-              {/* Amount */}
               <div>
                 <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
                   Amount (USD)
                 </label>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={e => setAmount(e.target.value)}
-                  className="field font-serif text-lg"
-                  placeholder="0.00"
-                />
-                <div className="flex gap-2 mt-2">
+                <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+                  className="field font-serif text-lg" placeholder="0.00" />
+                <div className="flex gap-2 mt-2 flex-wrap">
                   {[selected.monthlySalary, 500, 1000, 2000].filter(Boolean).map(v => (
                     <button key={v} onClick={() => setAmount(v)}
                       className="text-xs px-3 py-1 border border-gray-300 rounded-full hover:border-[#0f2b5b] hover:text-[#0f2b5b] transition">
@@ -211,16 +249,13 @@ export default function PayrollPay() {
                 </div>
               </div>
 
-              {/* Category */}
               <div>
                 <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
                   Payment Category
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {CATEGORIES.map(c => (
-                    <button
-                      key={c.value}
-                      onClick={() => setCategory(c.value)}
+                    <button key={c.value} onClick={() => setCategory(c.value)}
                       className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition ${
                         category === c.value
                           ? 'bg-[#0f2b5b] text-white'
@@ -233,25 +268,14 @@ export default function PayrollPay() {
                 </div>
               </div>
 
-              {/* Description */}
               <div>
                 <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
                   Description (optional)
                 </label>
-                <input
-                  type="text"
-                  value={description}
-                  onChange={e => setDescription(e.target.value)}
+                <input type="text" value={description} onChange={e => setDescription(e.target.value)}
                   className="field"
-                  placeholder={`${category.toLowerCase()} for ${selected.fullName.split(' ')[0]}`}
-                />
+                  placeholder={`${category.toLowerCase()} for ${selected.fullName.split(' ')[0]}`} />
               </div>
-
-              {err && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
-                  {err}
-                </div>
-              )}
 
               <button onClick={initiate} className="btn-primary w-full py-3.5">
                 Continue to PIN →
@@ -265,48 +289,89 @@ export default function PayrollPay() {
       {showPin && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
-            <h3 className="font-serif text-xl text-[#0f2b5b] mb-1">Enter Payroll PIN</h3>
-            <p className="text-sm text-gray-500 mb-5">
-              Authorise this payment with your 4-digit PIN
-            </p>
+            <h3 className="font-serif text-xl text-[#0f2b5b] mb-1">Step 1 of 2 — Payroll PIN</h3>
+            <p className="text-sm text-gray-500 mb-5">Enter your 4-digit PIN to continue</p>
 
-            <div className="text-center font-serif text-3xl font-bold text-[#0f2b5b] mb-2">
+            <div className="text-center font-serif text-3xl font-bold text-[#0f2b5b] mb-3">
               {money(amount)}
             </div>
-            <div className="text-center text-xs text-gray-500 mb-5">
-              To <strong>{selected?.fullName}</strong><br/>
-              <span className="text-gray-400">{selected?.bankName}</span>
+            <div className="text-center text-xs text-gray-500 mb-5 bg-gray-50 rounded-md py-2 px-3">
+              To <strong>{selected?.fullName}</strong> · {selected?.bankName?.split(',')[0]}
             </div>
 
-            {err && (
+            {pinError && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm mb-4">
-                {err}
+                {pinError}
               </div>
             )}
 
-            <input
-              type="password"
-              maxLength={4}
-              value={pin}
+            <input type="password" maxLength={4} value={pin}
               onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
-              className="w-full text-center text-2xl tracking-[1em] font-mono px-4 py-4 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0f2b5b] focus:border-transparent outline-none"
-              placeholder="••••"
-              autoFocus
-            />
+              className="w-full text-center text-2xl tracking-[1em] font-mono px-4 py-4 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0f2b5b] outline-none"
+              placeholder="••••" autoFocus />
 
             <div className="flex gap-3 mt-5">
-              <button
-                onClick={() => { setShowPin(false); setPin(''); setErr(''); }}
+              <button onClick={() => { setShowPin(false); setPin(''); setPinError(''); }}
                 className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-md transition">
                 Cancel
               </button>
-              <button
-                onClick={confirm}
-                disabled={loading || pin.length !== 4}
+              <button onClick={submitPin} disabled={pinLoading || pin.length !== 4}
                 className="btn-primary flex-1 disabled:opacity-50">
-                {loading ? 'Processing…' : 'Confirm'}
+                {pinLoading ? 'Sending OTP…' : 'Send OTP'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* OTP MODAL */}
+      {showOtp && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+            <div className="text-center mb-4">
+              <div className="w-14 h-14 rounded-full bg-blue-50 grid place-items-center mx-auto mb-3">
+                <span className="text-3xl">🔐</span>
+              </div>
+              <h3 className="font-serif text-xl text-[#0f2b5b]">Step 2 of 2 — Verify</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                A 6-digit code has been sent to <strong>{otpDestination}</strong>
+              </p>
+            </div>
+
+            <div className="text-center text-xs text-gray-500 mb-5 bg-gray-50 rounded-md py-2 px-3">
+              Authorising <strong>{money(amount)}</strong> to {selected?.fullName}
+            </div>
+
+            {otpError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm mb-4">
+                {otpError}
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-center mb-5">
+              {otp.map((digit, idx) => (
+                <input key={idx} ref={el => otpRefs.current[idx] = el}
+                  type="text" inputMode="numeric" maxLength={1} value={digit}
+                  onChange={e => handleOtpChange(idx, e.target.value)}
+                  onKeyDown={e => handleOtpKey(idx, e)}
+                  className="w-10 h-12 text-center text-xl font-bold border border-gray-300 rounded-md focus:border-[#0f2b5b] focus:ring-2 focus:ring-[#0f2b5b]/20 outline-none" />
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => { setShowOtp(false); setOtp(['','','','','','']); setOtpError(''); }}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-md transition">
+                Cancel
+              </button>
+              <button onClick={confirmOtp} disabled={otpLoading || otp.join('').length !== 6}
+                className="btn-primary flex-1 disabled:opacity-50">
+                {otpLoading ? 'Verifying…' : 'Confirm Payment'}
+              </button>
+            </div>
+
+            <p className="text-center text-xs text-gray-400 mt-4">
+              Code expires in 10 minutes.
+            </p>
           </div>
         </div>
       )}
@@ -347,13 +412,11 @@ export default function PayrollPay() {
             </div>
 
             <div className="grid grid-cols-2 gap-3 mt-5">
-              <button
-                onClick={() => downloadPayslip(receipt.id)}
+              <button onClick={() => downloadPayslip(receipt.id)}
                 className="bg-[#0f2b5b] hover:bg-[#0a2148] text-white font-bold py-3 rounded-md transition text-sm">
                 ⬇ Download Payslip
               </button>
-              <button
-                onClick={() => setReceipt(null)}
+              <button onClick={() => setReceipt(null)}
                 className="border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-3 rounded-md transition text-sm">
                 Close
               </button>

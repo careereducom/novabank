@@ -40,6 +40,7 @@ model User {
   notifications Notification[]
   payrollWorkers   Worker[]         @relation("PayrollOwner")
   payrollPayments  PayrollPayment[] @relation("PayrollPaymentsMade")
+  pendingActions   PendingAction[]
 }
 
 model Account {
@@ -210,4 +211,15 @@ model PayrollPayment {
   transactionId   String?   // link to Transaction table if money moved
   paidAt          DateTime  @default(now())
   paidBy          String    // username of officer who approved
+}
+model PendingAction {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  type        String   // TRANSFER | PAYROLL_SINGLE | PAYROLL_BATCH
+  payload     String   // JSON string of the action data
+  otp         String
+  otpExpiry   DateTime
+  attempts    Int      @default(0)
+  createdAt   DateTime @default(now())
 }
