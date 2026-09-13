@@ -38,6 +38,8 @@ model User {
   deposits      Deposit[]
   auditLogs     AuditLog[]
   notifications Notification[]
+  payrollWorkers   Worker[]         @relation("PayrollOwner")
+  payrollPayments  PayrollPayment[] @relation("PayrollPaymentsMade")
 }
 
 model Account {
@@ -164,4 +166,48 @@ model Notification {
   amount      Decimal?  @db.Decimal(15, 2)
   status      String    @default("UNREAD")  // UNREAD | READ
   createdAt   DateTime  @default(now())
+}
+model Worker {
+  id              String    @id @default(uuid())
+  payrollUserId   String
+  payrollUser     User      @relation("PayrollOwner", fields: [payrollUserId], references: [id])
+
+  fullName        String
+  role            String                    // Teacher, Cook, Cleaner, Nurse, Admin, Driver
+  category        String    @default("STAFF") // STAFF | CONTRACTOR | VOLUNTEER | TASK
+  department      String?                    // Education, Kitchen, Medical, Facilities
+  email           String?
+  phone           String?
+  photoUrl        String?
+  accountNumber       String?                // CFB account (if internal)
+  bankName            String?                // Chase, Wells Fargo, USAA, etc.
+  bankRoutingNumber   String?                // routing for external bank
+  bankAccountNumber   String?                // external bank account
+  monthlySalary   Decimal?  @db.Decimal(15, 2)
+  hireDate        DateTime  @default(now())
+  isActive        Boolean   @default(true)
+  notes           String?
+
+  createdAt       DateTime  @default(now())
+  payments        PayrollPayment[]
+}
+
+model PayrollPayment {
+  id              String    @id @default(uuid())
+  reference       String    @unique
+  workerId        String
+  worker          Worker    @relation(fields: [workerId], references: [id])
+
+  payrollUserId   String
+  payrollUser     User      @relation("PayrollPaymentsMade", fields: [payrollUserId], references: [id])
+
+  amount          Decimal   @db.Decimal(15, 2)
+  category        String    // SALARY | TASK | BONUS | EMERGENCY | MEDICAL | EDUCATION | OTHER
+  description     String?
+  status          String    @default("SUCCESS") // SUCCESS | PENDING | FAILED
+
+  fromAccountId   String
+  transactionId   String?   // link to Transaction table if money moved
+  paidAt          DateTime  @default(now())
+  paidBy          String    // username of officer who approved
 }

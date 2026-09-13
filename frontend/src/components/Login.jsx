@@ -362,64 +362,109 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Phone mockup */}
+          {/* Phone mockup — anonymous professional design */}
           <div className="flex justify-center">
             <div className="relative">
               <div className="w-[320px] h-[640px] bg-gray-900 rounded-[3rem] p-3 shadow-2xl border-4 border-gray-800">
-                <div className="w-full h-full bg-gradient-to-br from-[#0f2b5b] to-[#0a2148] rounded-[2.5rem] overflow-hidden relative">
+                <div className="w-full h-full bg-gradient-to-br from-[#0f2b5b] via-[#0a2148] to-[#0f2b5b] rounded-[2.5rem] overflow-hidden relative">
+                  {/* Notch */}
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-gray-900 rounded-b-2xl z-10"></div>
 
-                  <div className="pt-10 px-5 text-white">
+                  {/* Status bar */}
+                  <div className="pt-8 px-6 flex justify-between text-white text-[10px] tracking-wider">
+                    <span>9:41</span>
+                    <div className="flex items-center gap-1">
+                      <span>●●●</span>
+                      <span>▮</span>
+                    </div>
+                  </div>
+
+                  {/* Screen content */}
+                  <div className="px-5 pt-3 text-white">
+                    {/* App header */}
                     <div className="flex justify-between items-center mb-5">
-                      <div>
-                        <p className="text-[10px] text-blue-200">Good morning</p>
-                        <p className="font-bold text-sm">Alexander Reyes</p>
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-md bg-[#c9a227] grid place-items-center font-bold text-[#0f2b5b] text-xs font-serif">CFB</div>
+                        <div className="leading-tight">
+                          <p className="text-[9px] tracking-[.2em] text-blue-200">CONTINENTAL</p>
+                          <p className="text-[9px] tracking-[.2em] text-blue-200">FEDERAL</p>
+                        </div>
                       </div>
-                      <div className="w-9 h-9 rounded-full bg-[#c9a227] grid place-items-center text-[#0f2b5b] font-bold text-xs">
-                        AR
+                      <div className="w-8 h-8 rounded-full bg-white/10 grid place-items-center">
+                        <span className="text-sm">🔔</span>
                       </div>
                     </div>
 
-                    <div className="bg-white/10 rounded-xl p-4 mb-4 backdrop-blur">
-                      <p className="text-[10px] text-blue-200 uppercase tracking-wider">Available Balance</p>
-                      <p className="font-serif text-2xl font-bold mt-1">$87.3M</p>
-                      <p className="text-[10px] text-blue-200 mt-1">Acct ••••3650</p>
+                    {/* Balance card — anonymous */}
+                    <div className="bg-white/10 rounded-2xl p-5 mb-4 backdrop-blur border border-white/10">
+                      <p className="text-[10px] text-blue-200 uppercase tracking-[.2em]">Total Balance</p>
+                      <p className="font-serif text-3xl font-bold mt-2 tracking-tight">$ •••• ••••</p>
+                      <div className="flex items-center gap-2 mt-3">
+                        <span className="w-2 h-2 rounded-full bg-green-400"></span>
+                        <p className="text-[10px] text-blue-200">Account secured · FDIC insured</p>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-4 gap-2 mb-4">
-                      {['↗','⌂','⬇','≡'].map((i, x) => (
-                        <div key={x} className="aspect-square bg-white/10 rounded-lg grid place-items-center text-lg">
-                          {i}
+                    {/* Quick actions grid */}
+                    <div className="grid grid-cols-4 gap-2 mb-5">
+                      {[
+                        { i: '↗', l: 'Send' },
+                        { i: '⬇', l: 'Deposit' },
+                        { i: '⌂', l: 'Bills' },
+                        { i: '≡', l: 'More' },
+                      ].map((x, idx) => (
+                        <div key={idx} className="aspect-square bg-white/10 hover:bg-white/15 rounded-xl grid place-items-center cursor-pointer transition">
+                          <div className="text-center">
+                            <p className="text-lg">{x.i}</p>
+                            <p className="text-[8px] text-blue-200 mt-0.5">{x.l}</p>
+                          </div>
                         </div>
                       ))}
                     </div>
 
-                    <p className="text-[10px] text-blue-200 uppercase tracking-wider mb-2">Recent</p>
-                    {[
-                      { n: 'Netflix', a: '-$22.99' },
-                      { n: 'Payroll', a: '+$8,500' },
-                      { n: 'Con Edison', a: '-$145' },
-                    ].map((t, x) => (
-                      <div key={x} className="flex justify-between py-2 border-b border-white/5">
-                        <span className="text-xs">{t.n}</span>
-                        <span className={`text-xs font-bold ${t.a.startsWith('+') ? 'text-green-300' : 'text-white'}`}>{t.a}</span>
+                    {/* Recent activity placeholder */}
+                    <div className="flex justify-between items-center mb-3">
+                      <p className="text-[10px] text-blue-200 uppercase tracking-[.2em]">Recent</p>
+                      <p className="text-[10px] text-[#c9a227]">See all →</p>
+                    </div>
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="flex items-center gap-3 py-2.5 border-b border-white/5">
+                        <div className="w-8 h-8 rounded-full bg-white/10 grid place-items-center">
+                          <div className="w-3 h-3 rounded-full bg-white/30"></div>
+                        </div>
+                        <div className="flex-1 space-y-1.5">
+                          <div className="h-2 bg-white/20 rounded-full w-3/4"></div>
+                          <div className="h-1.5 bg-white/10 rounded-full w-1/2"></div>
+                        </div>
+                        <div className="w-14 h-3 bg-white/20 rounded-full"></div>
                       </div>
                     ))}
                   </div>
 
+                  {/* Bottom nav */}
                   <div className="absolute bottom-0 left-0 right-0 bg-white/5 backdrop-blur border-t border-white/10 px-6 py-3 flex justify-around">
                     {['⌂','↗','📊','⚙'].map((i, x) => (
-                      <span key={x} className={`text-lg ${x === 0 ? 'text-[#c9a227]' : 'text-blue-200'}`}>{i}</span>
+                      <span key={x} className={`text-lg ${x === 0 ? 'text-[#c9a227]' : 'text-blue-300'}`}>{i}</span>
                     ))}
                   </div>
                 </div>
               </div>
 
-              <div className="absolute -right-6 top-20 bg-white rounded-xl shadow-xl p-3 flex items-center gap-2">
+              {/* Floating badge — generic */}
+              <div className="absolute -right-6 top-24 bg-white rounded-xl shadow-2xl p-3 flex items-center gap-2 border border-gray-100">
                 <span className="w-9 h-9 rounded-full bg-green-50 grid place-items-center text-green-600 text-lg">✓</span>
                 <div className="text-xs">
-                  <p className="font-bold text-gray-800">Transfer sent</p>
+                  <p className="font-bold text-gray-800">Money sent</p>
                   <p className="text-gray-500">Just now</p>
+                </div>
+              </div>
+
+              {/* Second floating badge — security */}
+              <div className="absolute -left-8 bottom-32 bg-white rounded-xl shadow-2xl p-3 flex items-center gap-2 border border-gray-100">
+                <span className="w-9 h-9 rounded-full bg-blue-50 grid place-items-center text-blue-600 text-lg">🔒</span>
+                <div className="text-xs">
+                  <p className="font-bold text-gray-800">256-bit</p>
+                  <p className="text-gray-500">Secure</p>
                 </div>
               </div>
             </div>
@@ -503,6 +548,7 @@ export default function Login() {
       </footer>
 
       <LiveChat />
+
       {/* VIDEO MODAL */}
       {showVideo && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"

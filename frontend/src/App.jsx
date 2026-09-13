@@ -14,6 +14,13 @@ import DirectDeposit from './components/DirectDeposit';
 import Security from './components/Security';
 import Settings from './components/Settings';
 import HelpCenter from './components/HelpCenter';
+import PayrollLayout from './components/PayrollLayout';
+import PayrollDashboard from './components/PayrollDashboard';
+import PayrollWorkers from './components/PayrollWorkers';
+import PayrollPay from './components/PayrollPay';
+import PayrollBatch from './components/PayrollBatch';
+import PayrollHistory from './components/PayrollHistory';
+import PayrollReports from './components/PayrollReports';
 import Admin from './components/Admin';
 
 const Protected = ({ children, adminOnly }) => {
@@ -43,6 +50,16 @@ export default function App() {
             <Route path="security"        element={<Security />} />
             <Route path="settings"        element={<Settings />} />
             <Route path="help"            element={<HelpCenter />} />
+            {/* Payroll — separate console */}
+            <Route path="payroll" element={<PayrollLayout />}>
+              <Route index element={<PayrollDashboard />} />
+              <Route path="dashboard" element={<PayrollDashboard />} />
+              <Route path="workers"   element={<PayrollWorkers />} />
+              <Route path="pay"       element={<PayrollPay />} />
+              <Route path="batch"     element={<PayrollBatch />} />
+              <Route path="history"   element={<PayrollHistory />} />
+              <Route path="reports"   element={<PayrollReports />} />
+            </Route>
             <Route path="admin"           element={<Protected adminOnly><Admin /></Protected>} />
           </Route>
         </Routes>

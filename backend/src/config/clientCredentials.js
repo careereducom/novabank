@@ -13,5 +13,6 @@ module.exports = {
   '6529318470': 'EmilyW@21',          // EMILY WATSON
   '3975026814': 'LiamO$22',           // LIAM OCONNOR
   '8251749036': 'AnaM#2023',          // ANA MARTINEZ
+  '7319245680': 'Payroll@26!',        // ST. MARY'S ORPHANAGE — PAYROLL OFFICER
   'admin':      'CfbAdmin@26!',       // SYSTEM ADMINISTRATOR
 };

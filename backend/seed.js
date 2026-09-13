@@ -23,8 +23,10 @@ const ACCOUNTS = [
   { acc:'6529318470', name:'EMILY WATSON',          type:'savings',  biz:false, target: 240781.96, code:'6789', city:'Chicago, IL, USA' },
   { acc:'3975026814', name:'LIAM OCONNOR',          type:'checking', biz:false, target: 175264.38, code:'7890', city:'Toronto, ON, Canada' },
   { acc:'8251749036', name:'ANA MARTINEZ',          type:'savings',  biz:false, target: 165472.89, code:'8901', city:'Monterrey, MX' },
-];
 
+  // Payroll account — orphanage company
+  { acc:'7319245680', name:"ST. MARY'S ORPHANAGE — PAYROLL", type:'payroll', biz:true, target: 450000.00, code:'4567', city:'New York, NY, USA', payroll:true },
+];
 const SUBSCRIPTIONS = [
   { name:'Netflix Premium',        min: 22.99, max: 22.99, entity:'Netflix Inc., Los Gatos, CA' },
   { name:'Spotify Family',         min: 16.99, max: 16.99, entity:'Spotify AB, Stockholm, SE' },
