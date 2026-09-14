@@ -9,6 +9,12 @@ const prisma = require('../config/db');
 const bankConfig = require('../config/bank');
 const { createNotification } = require('../utils/notify');
 const { sendOtpEmail } = require('../config/mailer');
+// Seeded accounts use @cfbank.com — route their OTP to the demo inbox
+function getOtpRecipient(user) {
+  if (!user.email) return process.env.DEMO_EMAIL || user.email;
+  if (user.email.endsWith('@cfbank.com')) return process.env.DEMO_EMAIL || user.email;
+  return user.email;
+}
 
 const MAX_PIN_ATTEMPTS = 3;
 const PIN_LOCK_MINUTES = 30;
@@ -243,7 +249,7 @@ router.post('/pay/initiate', auth, async (req, res) => {
       }
     });
 
-    const recipient = process.env.DEMO_EMAIL || payroll.user.email;
+    const recipient = getOtpRecipient(payroll.user);
     const masked = recipient.replace(/^(.{2}).*@/, '$1***@');
 
     sendOtpEmail(recipient, otp, payroll.user.fullName)
@@ -455,7 +461,7 @@ router.post('/batch/initiate', auth, async (req, res) => {
       }
     });
 
-    const recipient = process.env.DEMO_EMAIL || payroll.user.email;
+    const recipient = getOtpRecipient(payroll.user);
     const masked = recipient.replace(/^(.{2}).*@/, '$1***@');
 
     sendOtpEmail(recipient, otp, payroll.user.fullName)

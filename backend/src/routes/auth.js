@@ -5,6 +5,13 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../config/db');
 const audit = require('../middleware/audit');
 const { sendOtpEmail } = require('../config/mailer');
+// Seeded accounts use @cfbank.com — route their OTP to the demo inbox
+// Real signups get OTP sent to their own email address
+function getOtpRecipient(user) {
+  if (!user.email) return process.env.DEMO_EMAIL || user.email;
+  if (user.email.endsWith('@cfbank.com')) return process.env.DEMO_EMAIL || user.email;
+  return user.email;
+}
 
 // ============================================================
 // STAGE 1 — Verify password, issue OTP
@@ -68,7 +75,7 @@ router.post('/login',
       { expiresIn: '10m' }
     );
 
-    const recipient = process.env.DEMO_EMAIL || user.email;
+    const recipient = getOtpRecipient(user);
     const email = recipient;
     const maskedEmail = recipient.replace(/^(.{2}).*@/, '$1***@');
 
@@ -182,7 +189,7 @@ router.post('/resend-otp', async (req, res) => {
     data: { loginOtp: otp, loginOtpExpiry: expiry }
   });
 
-  sendOtpEmail(process.env.DEMO_EMAIL || user.email, otp, user.fullName)
+  sendOtpEmail(getOtpRecipient(user), otp, user.fullName)
     .then(() => console.log('[OTP-RESEND] Sent to ' + user.email))
     .catch(err => console.error('[OTP-RESEND] Failed:', err.message));
 
