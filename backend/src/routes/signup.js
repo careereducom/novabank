@@ -80,13 +80,17 @@ async function sendApplicationReceived(email, fullName, accountNumber) {
       </div>
     </div>
   `;
+  // In production this goes to the applicant. Demo routes to DEMO_EMAIL
+  // because Resend's sandbox only allows the account owner's email.
+  const recipient = process.env.DEMO_EMAIL || email;
 
   return resend.emails.send({
     from: 'Continental Federal Bank <onboarding@resend.dev>',
-    to: email,
-    subject: 'Application Received — Continental Federal Bank',
+    to: recipient,
+    subject: `Application Received — ${fullName} (${email})`,
     html,
   });
+
 }
 
 // ── Email to admin ──────────────────────────────────────────
