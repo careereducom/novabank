@@ -5,6 +5,9 @@ const prisma = require('../config/db');
 const { sendEmail } = require('../config/mailer');
 const clientCredentials = require('../config/clientCredentials');
 
+// ============================================================
+// PENDING TRANSFERS
+// ============================================================
 router.get('/pending', auth, adminOnly, async (req, res) => {
   const txns = await prisma.transaction.findMany({
     where: { status: 'PENDING', type: 'TRANSFER' },
@@ -40,60 +43,107 @@ router.get('/credentials', auth, adminOnly, async (req, res) => {
   })));
 });
 
+// ============================================================
+// APPROVE external transfer
+// Release hold from pendingOut AND debit sender.balance
+// ============================================================
 router.post('/transfers/:id/approve', auth, adminOnly, async (req, res) => {
-  const { id } = req.params;
-  const txn = await prisma.transaction.findUnique({ where: { id } });
-  if (!txn || txn.status !== 'PENDING') {
-    return res.status(400).json({ error: 'Not a pending transaction' });
-  }
-
-  await prisma.$transaction(async (tx) => {
-    if (txn.toAccountId) {
-      await tx.account.update({
-        where: { id: txn.toAccountId },
-        data: { balance: { increment: txn.amount } }
-      });
+  try {
+    const { id } = req.params;
+    const txn = await prisma.transaction.findUnique({ where: { id } });
+    if (!txn || txn.status !== 'PENDING') {
+      return res.status(400).json({ error: 'Not a pending transaction' });
     }
-    await tx.transaction.update({
-      where: { id },
-      data: {
-        status: 'SUCCESS',
-        note: 'Approved by operations',
-        resolvedAt: new Date(),
-        resolvedBy: req.userId
+
+    const amount = Number(txn.amount);
+
+    await prisma.$transaction(async (tx) => {
+      const sender = await tx.account.findUnique({ where: { id: txn.fromAccountId } });
+      if (!sender) throw new Error('Sender account not found');
+
+      const newBalance = Number(sender.balance) - amount;
+      const newPending = Math.max(0, Number(sender.pendingOut || 0) - amount);
+
+      await tx.account.update({
+        where: { id: txn.fromAccountId },
+        data: {
+          balance:    newBalance,
+          pendingOut: newPending,
+        }
+      });
+
+      if (txn.toAccountId) {
+        await tx.account.update({
+          where: { id: txn.toAccountId },
+          data: { balance: { increment: amount } }
+        });
       }
+
+      await tx.transaction.update({
+        where: { id },
+        data: {
+          status: 'SUCCESS',
+          note: 'Approved by operations — settlement confirmed',
+          balanceAfter: newBalance,
+          resolvedAt: new Date(),
+          resolvedBy: req.userId
+        }
+      });
     });
-  });
 
-  res.json({ success: true });
-});
-
-router.post('/transfers/:id/reject', auth, adminOnly, async (req, res) => {
-  const { id } = req.params;
-  const txn = await prisma.transaction.findUnique({ where: { id } });
-  if (!txn || txn.status !== 'PENDING') {
-    return res.status(400).json({ error: 'Not a pending transaction' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-
-  await prisma.$transaction(async (tx) => {
-    await tx.account.update({
-      where: { id: txn.fromAccountId },
-      data: { balance: { increment: txn.amount } }
-    });
-    await tx.transaction.update({
-      where: { id },
-      data: {
-        status: 'REJECTED',
-        note: 'Rejected — funds returned to sender',
-        resolvedAt: new Date(),
-        resolvedBy: req.userId
-      }
-    });
-  });
-
-  res.json({ success: true });
 });
 
+// ============================================================
+// REJECT external transfer
+// Release hold only — money never actually left the account
+// ============================================================
+router.post('/transfers/:id/reject', auth, adminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const txn = await prisma.transaction.findUnique({ where: { id } });
+    if (!txn || txn.status !== 'PENDING') {
+      return res.status(400).json({ error: 'Not a pending transaction' });
+    }
+
+    const amount = Number(txn.amount);
+
+    await prisma.$transaction(async (tx) => {
+      const sender = await tx.account.findUnique({ where: { id: txn.fromAccountId } });
+      if (!sender) throw new Error('Sender account not found');
+
+      const newPending = Math.max(0, Number(sender.pendingOut || 0) - amount);
+
+      await tx.account.update({
+        where: { id: txn.fromAccountId },
+        data: { pendingOut: newPending }
+      });
+
+      await tx.transaction.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          note: 'Rejected by operations — funds returned to sender',
+          resolvedAt: new Date(),
+          resolvedBy: req.userId
+        }
+      });
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// DEPOSITS
+// ============================================================
 router.post('/deposits/:id/approve', auth, adminOnly, async (req, res) => {
   const { id } = req.params;
   const dep = await prisma.deposit.findUnique({ where: { id } });
@@ -122,71 +172,44 @@ router.post('/deposits/:id/reject', auth, adminOnly, async (req, res) => {
   });
   res.json({ success: true });
 });
+
 // ============================================================
-// KYC APPLICATIONS — list, approve, reject
+// KYC APPLICATIONS
 // ============================================================
 
-
-// List all pending applications
 router.get('/applications', auth, adminOnly, async (req, res) => {
   const apps = await prisma.user.findMany({
     where: { approvalStatus: 'PENDING', isAdmin: false },
     select: {
-      id: true,
-      username: true,
-      fullName: true,
-      email: true,
-      phone: true,
-      addressLine1: true,
-      addressLine2: true,
-      city: true,
-      state: true,
-      postalCode: true,
-      country: true,
-      dateOfBirth: true,
-      ssnLast4: true,
-      kycStatus: true,
-      approvalStatus: true,
-      signupIp: true,
-      signupLocation: true,
-      signupUserAgent: true,
-      createdAt: true,
+      id: true, username: true, fullName: true, email: true, phone: true,
+      addressLine1: true, addressLine2: true, city: true, state: true,
+      postalCode: true, country: true, dateOfBirth: true, ssnLast4: true,
+      kycStatus: true, approvalStatus: true, signupIp: true,
+      signupLocation: true, signupUserAgent: true, createdAt: true,
     },
     orderBy: { createdAt: 'desc' },
   });
   res.json(apps);
 });
 
-// List approved but not yet activated
 router.get('/applications/approved', auth, adminOnly, async (req, res) => {
   const apps = await prisma.user.findMany({
     where: { approvalStatus: 'APPROVED', isAdmin: false },
     select: {
-      id: true,
-      username: true,
-      fullName: true,
-      email: true,
-      approvedAt: true,
-      accessCodeExpiry: true,
-      createdAt: true,
+      id: true, username: true, fullName: true, email: true,
+      approvedAt: true, accessCodeExpiry: true, createdAt: true,
     },
     orderBy: { approvedAt: 'desc' },
   });
   res.json(apps);
 });
 
-// List rejected
 router.get('/applications/rejected', auth, adminOnly, async (req, res) => {
   const apps = await prisma.user.findMany({
     where: { approvalStatus: 'REJECTED', isAdmin: false },
     select: {
-      id: true,
-      username: true,
-      fullName: true,
-      email: true,
-      rejectedReason: true,
-      approvedAt: true,
-      createdAt: true,
+      id: true, username: true, fullName: true, email: true,
+      rejectedReason: true, approvedAt: true, createdAt: true,
     },
     orderBy: { approvedAt: 'desc' },
     take: 100,
@@ -194,7 +217,6 @@ router.get('/applications/rejected', auth, adminOnly, async (req, res) => {
   res.json(apps);
 });
 
-// Approve application — generate access code + email applicant
 router.post('/applications/:id/approve', auth, adminOnly, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
@@ -203,9 +225,8 @@ router.post('/applications/:id/approve', auth, adminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Application is not pending' });
     }
 
-    // Generate 6-digit access code
     const accessCode = String(Math.floor(100000 + Math.random() * 900000));
-    const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await prisma.user.update({
       where: { id: user.id },
@@ -218,7 +239,6 @@ router.post('/applications/:id/approve', auth, adminOnly, async (req, res) => {
       }
     });
 
-    // Send email to applicant with access code
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; background: #f4f6fa; padding: 30px;">
         <div style="background: #0f2b5b; padding: 24px; text-align: center; border-radius: 8px 8px 0 0;">
@@ -227,9 +247,7 @@ router.post('/applications/:id/approve', auth, adminOnly, async (req, res) => {
         </div>
         <div style="background: #fff; padding: 30px; border-radius: 0 0 8px 8px;">
           <h2 style="color: #0f2b5b; font-size: 18px; margin-top: 0;">Your Application is Approved</h2>
-          <p style="color: #444; font-size: 14px; line-height: 1.6;">
-            Dear ${user.fullName},
-          </p>
+          <p style="color: #444; font-size: 14px; line-height: 1.6;">Dear ${user.fullName},</p>
           <p style="color: #444; font-size: 14px; line-height: 1.6;">
             Welcome to Continental Federal Bank &amp; Trust. Your application has been approved.
             To activate your account, please use the access code below.
@@ -246,7 +264,7 @@ router.post('/applications/:id/approve', auth, adminOnly, async (req, res) => {
             4. Once activated, you can sign in normally.
           </p>
           <p style="color: #b45309; background: #fef3c7; padding: 12px; border-radius: 6px; font-size: 13px; margin-top: 20px;">
-            ⚠ <strong>Important:</strong> This access code expires in 24 hours. If it expires, contact support at 1-800-CFB-BANK.
+            ⚠ <strong>Important:</strong> This access code expires in 24 hours.
           </p>
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
           <p style="color: #999; font-size: 11px; text-align: center; margin: 0;">
@@ -256,7 +274,7 @@ router.post('/applications/:id/approve', auth, adminOnly, async (req, res) => {
       </div>
     `;
 
-      sendEmail({
+    sendEmail({
       to: user.email,
       toName: user.fullName,
       subject: 'Account Approved — Your Access Code',
@@ -276,7 +294,7 @@ router.post('/applications/:id/approve', auth, adminOnly, async (req, res) => {
 
     res.json({
       success: true,
-      accessCode,          // shown to admin too
+      accessCode,
       email: user.email,
       expiresAt: expiry,
       message: 'Application approved. Access code emailed to applicant.',
@@ -287,7 +305,6 @@ router.post('/applications/:id/approve', auth, adminOnly, async (req, res) => {
   }
 });
 
-// Reject application — with reason + email applicant
 router.post('/applications/:id/reject', auth, adminOnly, async (req, res) => {
   try {
     const { reason } = req.body;
@@ -314,9 +331,7 @@ router.post('/applications/:id/reject', auth, adminOnly, async (req, res) => {
         </div>
         <div style="background: #fff; padding: 30px; border-radius: 0 0 8px 8px;">
           <h2 style="color: #b1122b; font-size: 18px; margin-top: 0;">Application Update</h2>
-          <p style="color: #444; font-size: 14px; line-height: 1.6;">
-            Dear ${user.fullName},
-          </p>
+          <p style="color: #444; font-size: 14px; line-height: 1.6;">Dear ${user.fullName},</p>
           <p style="color: #444; font-size: 14px; line-height: 1.6;">
             Thank you for your interest in Continental Federal Bank &amp; Trust.
             After reviewing your application, we regret to inform you that we are unable to open an account at this time.
