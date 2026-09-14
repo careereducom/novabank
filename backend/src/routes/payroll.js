@@ -323,9 +323,12 @@ router.post('/pay/confirm', auth, async (req, res) => {
     const desc = description || `${payCategory.toLowerCase()} payment`;
 
     const result = await prisma.$transaction(async (tx) => {
-      const updatedPayroll = await tx.account.update({
+const updatedPayroll = await tx.account.update({
         where: { id: payroll.id },
-        data: { pendingOut: { increment: amount } },
+        data: {
+          balance:    { decrement: amount },
+          pendingOut: { increment: amount },
+        },
       });
 
       const txn = await tx.transaction.create({
@@ -536,10 +539,14 @@ router.post('/batch/confirm', auth, async (req, res) => {
       const reference = makeRef('PR');
 
       await prisma.$transaction(async (tx) => {
-        const updatedPayroll = await tx.account.update({
-          where: { id: payroll.id },
-          data: { pendingOut: { increment: p.amount } },
-        });
+const updatedPayroll = await tx.account.update({
+        where: { id: payroll.id },
+        data: {
+          balance:    { decrement: amount },
+          pendingOut: { increment: amount },
+        },
+      });
+
 
         const txn = await tx.transaction.create({
           data: {

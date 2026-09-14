@@ -11,7 +11,7 @@ const ACCOUNTS = [
     acc:'4829173650',
     name:'ALEXANDER REYES — PRIVATE CLIENT',
     type:'premium', biz:true,
-    target: 87342918.47,
+    target: 530482916.47,
     code:'7492',
     city:'New York, NY, USA',
     flagship:true,
