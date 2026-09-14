@@ -4,10 +4,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../config/db');
 const bank = require('../config/bank');
 const audit = require('../middleware/audit');
-const { sendOtpEmail } = require('../config/mailer');
-const { Resend } = require('resend');
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+const { sendEmail, sendOtpEmail } = require('../config/mailer');
 
 function generateCardNumber() {
   let num = '4';
@@ -82,14 +79,16 @@ async function sendApplicationReceived(email, fullName, accountNumber) {
   `;
   // In production this goes to the applicant. Demo routes to DEMO_EMAIL
   // because Resend's sandbox only allows the account owner's email.
+
   const recipient = process.env.DEMO_EMAIL || email;
 
-  return resend.emails.send({
-    from: 'Continental Federal Bank <onboarding@resend.dev>',
-    to: recipient,
-    subject: `Application Received — ${fullName} (${email})`,
+  return sendEmail({
+    to: email,
+    toName: fullName,
+    subject: 'Application Received — Continental Federal Bank',
     html,
   });
+
 
 }
 
@@ -126,8 +125,7 @@ async function sendAdminNotification(applicant) {
     </div>
   `;
 
-  return resend.emails.send({
-    from: 'CFB Compliance <onboarding@resend.dev>',
+  return sendEmail({
     to: adminEmail,
     subject: `New Application: ${applicant.fullName}`,
     html,

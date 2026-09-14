@@ -1,7 +1,47 @@
-const { Resend } = require('resend');
+/**
+ * Email sender via Brevo (HTTP API — works from any host, sends to any recipient).
+ * Free tier: 300 emails/day.
+ */
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+async function sendEmail({ to, subject, html, toName }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    console.error('[mailer] BREVO_API_KEY not set');
+    throw new Error('Email service not configured');
+  }
 
+  const senderEmail = process.env.BREVO_SENDER_EMAIL || process.env.GMAIL_USER;
+
+  const payload = {
+    sender: {
+      name: 'Continental Federal Bank',
+      email: senderEmail,
+    },
+    to: [{ email: to, name: toName || to }],
+    subject,
+    htmlContent: html,
+  };
+
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': apiKey,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('[mailer] Brevo error:', res.status, errText);
+    throw new Error(`Brevo error: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+// ── OTP email (backward-compatible signature) ──────────────
 async function sendOtpEmail(to, code, fullName) {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; background: #f4f6fa; padding: 30px;">
@@ -11,9 +51,7 @@ async function sendOtpEmail(to, code, fullName) {
       </div>
       <div style="background: #fff; padding: 30px; border-radius: 0 0 8px 8px;">
         <h2 style="color: #0f2b5b; font-size: 18px; margin-top: 0;">Verification Code</h2>
-        <p style="color: #444; font-size: 14px; line-height: 1.6;">
-          Hello ${fullName || 'Customer'},
-        </p>
+        <p style="color: #444; font-size: 14px; line-height: 1.6;">Hello ${fullName || 'Customer'},</p>
         <p style="color: #444; font-size: 14px; line-height: 1.6;">
           Use the code below to complete your sign-in. It expires in 5 minutes.
         </p>
@@ -21,30 +59,18 @@ async function sendOtpEmail(to, code, fullName) {
           <p style="font-size: 11px; letter-spacing: 3px; color: #666; margin: 0 0 8px;">YOUR CODE</p>
           <p style="font-size: 36px; letter-spacing: 12px; font-family: monospace; color: #0f2b5b; margin: 0; font-weight: bold;">${code}</p>
         </div>
-        <p style="color: #666; font-size: 13px; line-height: 1.6;">
-          If you did not attempt to sign in, please contact us immediately at 1-800-CFB-BANK.
+        <p style="color: #666; font-size: 13px;">
+          If you did not attempt to sign in, contact us at 1-800-CFB-BANK.
         </p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
         <p style="color: #999; font-size: 11px; text-align: center; margin: 0;">
-          Continental Federal Bank &amp; Trust · Member FDIC · Equal Housing Lender<br>
-          This is an automated message. Do not reply.
+          Continental Federal Bank &amp; Trust · Member FDIC · Equal Housing Lender
         </p>
       </div>
     </div>
   `;
 
-  const result = await resend.emails.send({
-    from: 'Continental Federal Bank <onboarding@resend.dev>',
-    to,
-    subject: 'Your Continental Federal verification code',
-    html,
-  });
-
-  if (result.error) {
-    throw new Error('Resend error: ' + result.error.message);
-  }
-
-  return result;
+  return sendEmail({ to, subject: 'Your Continental Federal verification code', html });
 }
 
-module.exports = { sendOtpEmail };
+module.exports = { sendEmail, sendOtpEmail };

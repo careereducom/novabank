@@ -2,6 +2,7 @@ const router = require('express').Router();
 const auth = require('../middleware/auth');
 const adminOnly = require('../middleware/admin');
 const prisma = require('../config/db');
+const { sendEmail } = require('../config/mailer');
 const clientCredentials = require('../config/clientCredentials');
 
 router.get('/pending', auth, adminOnly, async (req, res) => {
@@ -125,8 +126,6 @@ router.post('/deposits/:id/reject', auth, adminOnly, async (req, res) => {
 // KYC APPLICATIONS — list, approve, reject
 // ============================================================
 
-const { Resend } = require('resend');
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 // List all pending applications
 router.get('/applications', auth, adminOnly, async (req, res) => {
@@ -257,9 +256,9 @@ router.post('/applications/:id/approve', auth, adminOnly, async (req, res) => {
       </div>
     `;
 
-    resend.emails.send({
-      from: 'Continental Federal Bank <onboarding@resend.dev>',
+      sendEmail({
       to: user.email,
+      toName: user.fullName,
       subject: 'Account Approved — Your Access Code',
       html,
     }).then(() => console.log(`[KYC] Approval email sent to ${user.email}`))
@@ -337,9 +336,9 @@ router.post('/applications/:id/reject', auth, adminOnly, async (req, res) => {
       </div>
     `;
 
-    resend.emails.send({
-      from: 'Continental Federal Bank <onboarding@resend.dev>',
+    sendEmail({
       to: user.email,
+      toName: user.fullName,
       subject: 'Application Update — Continental Federal Bank',
       html,
     }).then(() => console.log(`[KYC] Rejection email sent to ${user.email}`))
