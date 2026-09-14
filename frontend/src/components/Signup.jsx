@@ -65,16 +65,20 @@ export default function Signup() {
       </header>
 
       <main className="flex-1 max-w-2xl w-full mx-auto px-6 py-12">
-        <div className="text-center mb-8">
-          <h1 className="font-serif text-4xl text-[#0f2b5b] mb-2">Open your account</h1>
-          <p className="text-gray-500">No monthly fees. Instant virtual card. FDIC insured.</p>
-        </div>
+        {step <= 3 && (
+          <>
+            <div className="text-center mb-8">
+              <h1 className="font-serif text-4xl text-[#0f2b5b] mb-2">Open your account</h1>
+              <p className="text-gray-500">No monthly fees. Instant virtual card. FDIC insured.</p>
+            </div>
 
-        <div className="flex items-center justify-center gap-2 mb-8">
-          {[1,2,3].map(n => (
-            <div key={n} className={`h-1.5 w-16 rounded-full ${step >= n ? 'bg-[#0f2b5b]' : 'bg-gray-200'}`}></div>
-          ))}
-        </div>
+            <div className="flex items-center justify-center gap-2 mb-8">
+              {[1,2,3].map(n => (
+                <div key={n} className={`h-1.5 w-16 rounded-full ${step >= n ? 'bg-[#0f2b5b]' : 'bg-gray-200'}`}></div>
+              ))}
+            </div>
+          </>
+        )}
 
         <div className="card p-8">
           {err && (
@@ -143,11 +147,12 @@ export default function Signup() {
               <div className="flex gap-3">
                 <button onClick={() => setStep(2)} className="flex-1 border border-gray-300 text-gray-700 font-semibold py-3.5 rounded-md">Back</button>
                 <button onClick={submit} disabled={loading} className="btn-primary flex-1 disabled:opacity-50">
-                  {loading ? 'Opening account…' : 'Open Account'}
+                  {loading ? 'Submitting…' : 'Submit Application'}
                 </button>
               </div>
             </div>
           )}
+
           {step === 4 && result && (
             <div className="space-y-6 text-center">
               <div className="w-16 h-16 rounded-full bg-blue-50 grid place-items-center mx-auto">
@@ -194,3 +199,8 @@ export default function Signup() {
               </button>
             </div>
           )}
+        </div>
+      </main>
+    </div>
+  );
+}
