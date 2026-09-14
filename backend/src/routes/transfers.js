@@ -5,36 +5,17 @@ const prisma  = require('../config/db');
 const { resolveBank, isOurBank } = require('../config/usBanks');
 const { createNotification }    = require('../utils/notify');
 const { sendOtpEmail }          = require('../config/mailer');
-
-const EXTERNAL_NAMES = [
-  'JOHN SMITH', 'MARY JOHNSON', 'ROBERT WILLIAMS', 'PATRICIA BROWN',
-  'DAVID MILLER', 'JENNIFER DAVIS', 'RICHARD GARCIA', 'LINDA MARTINEZ',
-  'CHRISTOPHER RODRIGUEZ', 'BARBARA WILSON', 'DANIEL ANDERSON',
-  'SUSAN TAYLOR', 'MATTHEW THOMAS', 'KAREN MOORE', 'ANTHONY JACKSON',
-  'JOSE HERNANDEZ', 'GUADALUPE LOPEZ', 'FRANCISCO RAMIREZ', 'VERONICA FLORES',
-  'ALEJANDRO GOMEZ', 'PATRICIA MORALES', 'RICARDO CASTILLO', 'MARIANA VARGAS',
-  'WILLIAM MARTIN', 'ELIZABETH THOMPSON', 'PATRICK LEBLANC', 'MARGARET GAGNON',
-  'THOMAS ROY', 'CATHERINE BOUCHARD', 'DANIEL GAUTHIER',
-  'OLIVER BENNETT', 'CHARLOTTE HUGHES', 'HENRIK LARSEN', 'SOFIA ANDERSSON',
-  'PIERRE DUBOIS', 'MARIE LAURENT', 'MATTEO ROSSI', 'GIULIA BIANCHI',
-  'LUKAS MULLER', 'ANNA SCHMIDT', 'CARLOS FERNANDEZ', 'ELENA MORENO',
-];
-
-function hashNumber(str) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
-  }
-  return hash;
-}
-
-function resolveExternalName(accountNumber) {
-  return EXTERNAL_NAMES[hashNumber(accountNumber) % EXTERNAL_NAMES.length];
-}
+const { resolveExternalName }   = require('../config/externalNames');
 
 function makeRef(prefix) {
   return prefix + Date.now().toString(36).toUpperCase() +
          Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+
+function getOtpRecipient(user) {
+  if (!user.email) return process.env.DEMO_EMAIL || user.email;
+  if (user.email.endsWith('@cfbank.com')) return process.env.DEMO_EMAIL || user.email;
+  return user.email;
 }
 
 const MAX_PIN_ATTEMPTS = 3;
@@ -55,13 +36,7 @@ async function verifyPin(account, code) {
 // ============================================================
 router.post('/initiate', auth, async (req, res) => {
   try {
-    const {
-      fromAccountId,
-      toAccountNumber,
-      toRoutingNumber,
-      amount,
-      transferCode,
-    } = req.body;
+    const { fromAccountId, toAccountNumber, toRoutingNumber, amount, transferCode } = req.body;
 
     if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
     if (!toAccountNumber) return res.status(400).json({ error: 'Recipient account required' });
@@ -76,7 +51,6 @@ router.post('/initiate', auth, async (req, res) => {
 
     const senderUser = sender.user;
 
-    // ── PIN lock check ────────────────────────────────────────
     if (senderUser.pinLockedUntil && new Date() < senderUser.pinLockedUntil) {
       const minsLeft = Math.ceil((new Date(senderUser.pinLockedUntil) - new Date()) / 60000);
       return res.status(403).json({
@@ -84,7 +58,6 @@ router.post('/initiate', auth, async (req, res) => {
       });
     }
 
-    // ── PIN verify ────────────────────────────────────────────
     const pinOk = await verifyPin(sender, transferCode);
     if (!pinOk) {
       const attempts = (senderUser.pinAttempts || 0) + 1;
@@ -97,8 +70,7 @@ router.post('/initiate', auth, async (req, res) => {
       if (attempts >= MAX_PIN_ATTEMPTS) {
         await createNotification(senderUser.id, 'FAILED',
           'Account temporarily locked',
-          `Too many incorrect transfer codes. Locked for ${PIN_LOCK_MINUTES} minutes.`
-        );
+          `Too many incorrect transfer codes. Locked for ${PIN_LOCK_MINUTES} minutes.`);
         return res.status(403).json({
           error: `Too many incorrect attempts. Account locked for ${PIN_LOCK_MINUTES} minutes.`
         });
@@ -109,7 +81,6 @@ router.post('/initiate', auth, async (req, res) => {
       });
     }
 
-    // ── PIN correct — reset counter ───────────────────────────
     if ((senderUser.pinAttempts > 0) || senderUser.pinLockedUntil) {
       await prisma.user.update({
         where: { id: senderUser.id },
@@ -117,7 +88,6 @@ router.post('/initiate', auth, async (req, res) => {
       });
     }
 
-    // ── Available balance check ───────────────────────────────
     const available = Number(sender.balance) - Number(sender.pendingOut || 0);
     if (available < amount) {
       return res.status(400).json({
@@ -126,11 +96,9 @@ router.post('/initiate', auth, async (req, res) => {
       });
     }
 
-    // ── Generate OTP + store pending action ───────────────────
     const otp = String(Math.floor(100000 + Math.random() * 900000));
     const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MIN * 60 * 1000);
 
-    // Clean up old pending actions for this user (one at a time)
     await prisma.pendingAction.deleteMany({
       where: { userId: req.userId, type: 'TRANSFER' }
     });
@@ -150,8 +118,7 @@ router.post('/initiate', auth, async (req, res) => {
       }
     });
 
-    // Send OTP to email
-    const recipient = process.env.DEMO_EMAIL || senderUser.email;
+    const recipient = getOtpRecipient(senderUser);
     const masked = recipient.replace(/^(.{2}).*@/, '$1***@');
 
     sendOtpEmail(recipient, otp, senderUser.fullName)
@@ -212,7 +179,6 @@ router.post('/confirm', auth, async (req, res) => {
       });
     }
 
-    // ── OTP correct — execute transfer ────────────────────────
     const { fromAccountId, toAccountNumber, toRoutingNumber, amount } =
       JSON.parse(action.payload);
 
@@ -230,6 +196,7 @@ router.post('/confirm', auth, async (req, res) => {
       });
     }
 
+    // ── Resolve recipient: internal → admin directory → simulated ──
     const recipient = await prisma.account.findUnique({
       where: { accountNumber: toAccountNumber },
       include: { user: true },
@@ -238,14 +205,28 @@ router.post('/confirm', auth, async (req, res) => {
     const isInternal = !!(recipient && recipient.isRegistered);
     const finalStatus = isInternal ? 'SUCCESS' : 'PENDING';
 
-    let recipientName = recipient ? recipient.accountName : resolveExternalName(toAccountNumber);
+    let recipientName;
     let recipientBank;
-    if (isInternal) {
+    let recipientRouting;
+
+    if (isInternal && recipient) {
+      recipientName = recipient.accountName;
       recipientBank = 'Continental Federal Bank & Trust, New York, NY';
-    } else if (toRoutingNumber) {
-      recipientBank = resolveBank(toRoutingNumber);
+      recipientRouting = '021407912';
     } else {
-      recipientBank = 'Beneficiary Bank';
+      const beneficiary = await prisma.externalBeneficiary.findUnique({
+        where: { accountNumber: toAccountNumber },
+      });
+
+      if (beneficiary && beneficiary.isVerified) {
+        recipientName = beneficiary.accountName;
+        recipientBank = beneficiary.bankName;
+        recipientRouting = beneficiary.routingNumber;
+      } else {
+        recipientName = resolveExternalName(toAccountNumber);
+        recipientBank = toRoutingNumber ? resolveBank(toRoutingNumber) : 'Beneficiary Bank';
+        recipientRouting = toRoutingNumber || '';
+      }
     }
 
     const reference = makeRef('NB');
@@ -286,7 +267,6 @@ router.post('/confirm', auth, async (req, res) => {
       });
     });
 
-    // Notifications
     const amountStr = '$' + Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2 });
 
     await createNotification(
@@ -309,7 +289,6 @@ router.post('/confirm', auth, async (req, res) => {
       );
     }
 
-    // Delete pending action
     await prisma.pendingAction.delete({ where: { id: action.id } });
 
     res.json({
@@ -333,7 +312,7 @@ router.post('/confirm', auth, async (req, res) => {
           name: recipientName,
           account: toAccountNumber,
           bank: recipientBank,
-          routing: toRoutingNumber || (isInternal ? '021407912' : ''),
+          routing: recipientRouting,
         },
         amount: Number(amount),
         balanceAfter: Number(result.balanceAfter),

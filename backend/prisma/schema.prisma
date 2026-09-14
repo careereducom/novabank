@@ -235,3 +235,17 @@ model PendingAction {
   attempts    Int      @default(0)
   createdAt   DateTime @default(now())
 }
+model ExternalBeneficiary {
+  id              String   @id @default(uuid())
+  accountNumber   String   @unique
+  routingNumber   String
+  accountName     String
+  bankName        String
+  accountType     String   @default("checking")
+  customerId      String?
+  description     String?
+  isVerified      Boolean  @default(true)
+  addedBy         String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
