@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import Signup from './components/Signup';
+import Activate from './components/Activate';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import Transfer from './components/Transfer';
@@ -37,6 +38,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/activate" element={<Activate />} />
           <Route path="/" element={<Protected><Layout /></Protected>}>
             <Route index element={<Navigate to="/dashboard" />} />
             <Route path="dashboard"       element={<Dashboard />} />

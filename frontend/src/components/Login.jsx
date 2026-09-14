@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../api';
 import LiveChat from './LiveChat';
 
-// Free stock video — city skyline
 const HERO_VIDEO = 'https://cdn.pixabay.com/video/2020/05/25/40130-424930032_large.mp4';
 const HERO_POSTER = 'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=1600&q=80';
 
@@ -15,6 +14,7 @@ export default function Login() {
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError]       = useState('');
+  const [errorType, setErrorType] = useState('');
   const [loading, setLoading]   = useState(false);
   const [showVideo, setShowVideo] = useState(false);
 
@@ -28,7 +28,7 @@ export default function Login() {
 
   const submit = async (e) => {
     e.preventDefault();
-    setError(''); setLoading(true);
+    setError(''); setErrorType(''); setLoading(true);
     try {
       const data = await apiFetch('/auth/login', {
         method: 'POST',
@@ -41,7 +41,19 @@ export default function Login() {
         setStep('otp');
       }
     } catch (err) {
-      setError(err.message || 'Unable to sign in. Please try again.');
+      // Detect pending/rejected status
+      if (err.message === 'ACCOUNT_PENDING') {
+        setErrorType('PENDING');
+        setError('Your application is under review. You\'ll receive an access code by email once approved.');
+      } else if (err.message === 'ACCOUNT_REJECTED') {
+        setErrorType('REJECTED');
+        setError('Your application was declined. Please contact support for details.');
+      } else if (err.message === 'ACCOUNT_INACTIVE') {
+        setErrorType('INACTIVE');
+        setError('Your account is not yet active. Please activate using your access code.');
+      } else {
+        setError(err.message || 'Unable to sign in. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -87,7 +99,6 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
-      {/* HEADER */}
       <header className="bg-[#0f2b5b] text-white sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -111,18 +122,10 @@ export default function Login() {
         </div>
       </header>
 
-      {/* HERO WITH VIDEO BACKGROUND */}
       <section className="relative overflow-hidden">
-        <video
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="auto"
-          poster={HERO_POSTER}
+        <video autoPlay muted loop playsInline preload="auto" poster={HERO_POSTER}
           className="absolute inset-0 w-full h-full object-cover"
-          onError={(e) => { e.target.style.display = 'none'; }}
-        >
+          onError={(e) => { e.target.style.display = 'none'; }}>
           <source src={HERO_VIDEO} type="video/mp4" />
         </video>
 
@@ -149,8 +152,7 @@ export default function Login() {
               <a href="#signin" className="border border-white/30 hover:bg-white/10 text-white font-semibold py-3.5 px-8 rounded-md transition">
                 Sign In
               </a>
-              <button
-                onClick={() => setShowVideo(true)}
+              <button onClick={() => setShowVideo(true)}
                 className="flex items-center gap-2 text-white font-semibold py-3.5 px-6 rounded-md hover:bg-white/10 transition border border-transparent">
                 <span className="w-9 h-9 rounded-full bg-white/20 grid place-items-center text-sm">▶</span>
                 Watch our story
@@ -175,11 +177,8 @@ export default function Login() {
 
           <div className="relative hidden md:block">
             <div className="rounded-2xl overflow-hidden shadow-2xl border-4 border-white/10">
-              <img
-                src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=800&h=900&fit=crop"
-                alt="Happy customer"
-                className="w-full h-[520px] object-cover"
-              />
+              <img src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=800&h=900&fit=crop"
+                alt="Happy customer" className="w-full h-[520px] object-cover" />
             </div>
             <div className="absolute -bottom-6 -left-6 bg-white rounded-xl shadow-2xl p-4 flex items-center gap-3">
               <div className="w-12 h-12 rounded-full bg-green-50 grid place-items-center">
@@ -194,7 +193,6 @@ export default function Login() {
         </div>
       </section>
 
-      {/* TRUST BAR */}
       <section className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
           {[
@@ -212,7 +210,6 @@ export default function Login() {
         </div>
       </section>
 
-      {/* SIGN-IN */}
       <section id="signin" className="bg-[#f4f6fa] py-16">
         <div className="max-w-md mx-auto px-6">
           <div className="text-center mb-6">
@@ -228,8 +225,44 @@ export default function Login() {
 
           <div className="card p-8 bg-white">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm mb-5">
-                {error}
+              <div className={`border px-4 py-3 rounded-md text-sm mb-5 ${
+                errorType === 'PENDING'
+                  ? 'bg-blue-50 border-blue-200 text-blue-800'
+                  : errorType === 'REJECTED'
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-red-50 border-red-200 text-red-700'
+              }`}>
+                {errorType === 'PENDING' && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-lg flex-shrink-0">⏳</span>
+                    <div>
+                      <p className="font-bold">Application Under Review</p>
+                      <p className="mt-1 text-xs">{error}</p>
+                    </div>
+                  </div>
+                )}
+                {errorType === 'REJECTED' && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-lg flex-shrink-0">✕</span>
+                    <div>
+                      <p className="font-bold">Application Declined</p>
+                      <p className="mt-1 text-xs">{error}</p>
+                    </div>
+                  </div>
+                )}
+                {errorType === 'INACTIVE' && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-lg flex-shrink-0">🔐</span>
+                    <div>
+                      <p className="font-bold">Account Not Active</p>
+                      <p className="mt-1 text-xs">{error}</p>
+                      <Link to="/activate" className="inline-block mt-2 text-xs font-bold text-[#0f2b5b] underline">
+                        Activate your account →
+                      </Link>
+                    </div>
+                  </div>
+                )}
+                {!errorType && error}
               </div>
             )}
 
@@ -302,31 +335,32 @@ export default function Login() {
                 </button>
 
                 <div className="flex justify-between text-xs text-gray-500">
-                  <button onClick={() => { setStep('credentials'); setOtp(['','','','','','']); setError(''); }}
+                  <button onClick={() => { setStep('credentials'); setOtp(['','','','','','']); setError(''); setErrorType(''); }}
                     className="hover:text-[#0f2b5b] font-semibold">← Back</button>
                 </div>
               </div>
             )}
 
-            <div className="mt-6 pt-6 border-t border-gray-100 text-center">
-              <p className="text-sm text-gray-600 mb-3">New to Continental Federal?</p>
+            <div className="mt-6 pt-6 border-t border-gray-100 text-center space-y-3">
+              <p className="text-sm text-gray-600">New to Continental Federal?</p>
               <Link to="/signup"
                 className="block w-full border-2 border-[#0f2b5b] text-[#0f2b5b] font-bold py-3 rounded-md hover:bg-[#0f2b5b] hover:text-white transition text-center">
                 Open an Account in 3 Minutes
+              </Link>
+              <Link to="/activate"
+                className="block w-full text-[#0f2b5b] font-semibold py-2 text-sm hover:underline">
+                Already approved? Activate your account →
               </Link>
             </div>
           </div>
         </div>
       </section>
 
-      {/* MOBILE APP SECTION */}
       <section className="bg-white py-20">
         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-12 items-center">
           <div>
             <p className="text-[#c9a227] text-xs font-bold tracking-[.3em] mb-3">MOBILE BANKING</p>
-            <h2 className="font-serif text-4xl text-[#0f2b5b] mb-5">
-              Your bank, in your pocket.
-            </h2>
+            <h2 className="font-serif text-4xl text-[#0f2b5b] mb-5">Your bank, in your pocket.</h2>
             <p className="text-gray-600 text-lg leading-relaxed mb-6">
               Transfer funds, deposit checks, pay bills, and manage your cards —
               all from our award-winning mobile experience. Available on iOS and Android.
@@ -362,15 +396,11 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Phone mockup — anonymous professional design */}
           <div className="flex justify-center">
             <div className="relative">
               <div className="w-[320px] h-[640px] bg-gray-900 rounded-[3rem] p-3 shadow-2xl border-4 border-gray-800">
                 <div className="w-full h-full bg-gradient-to-br from-[#0f2b5b] via-[#0a2148] to-[#0f2b5b] rounded-[2.5rem] overflow-hidden relative">
-                  {/* Notch */}
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-gray-900 rounded-b-2xl z-10"></div>
-
-                  {/* Status bar */}
                   <div className="pt-8 px-6 flex justify-between text-white text-[10px] tracking-wider">
                     <span>9:41</span>
                     <div className="flex items-center gap-1">
@@ -378,10 +408,7 @@ export default function Login() {
                       <span>▮</span>
                     </div>
                   </div>
-
-                  {/* Screen content */}
                   <div className="px-5 pt-3 text-white">
-                    {/* App header */}
                     <div className="flex justify-between items-center mb-5">
                       <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-md bg-[#c9a227] grid place-items-center font-bold text-[#0f2b5b] text-xs font-serif">CFB</div>
@@ -394,8 +421,6 @@ export default function Login() {
                         <span className="text-sm">🔔</span>
                       </div>
                     </div>
-
-                    {/* Balance card — anonymous */}
                     <div className="bg-white/10 rounded-2xl p-5 mb-4 backdrop-blur border border-white/10">
                       <p className="text-[10px] text-blue-200 uppercase tracking-[.2em]">Total Balance</p>
                       <p className="font-serif text-3xl font-bold mt-2 tracking-tight">$ •••• ••••</p>
@@ -404,16 +429,9 @@ export default function Login() {
                         <p className="text-[10px] text-blue-200">Account secured · FDIC insured</p>
                       </div>
                     </div>
-
-                    {/* Quick actions grid */}
                     <div className="grid grid-cols-4 gap-2 mb-5">
-                      {[
-                        { i: '↗', l: 'Send' },
-                        { i: '⬇', l: 'Deposit' },
-                        { i: '⌂', l: 'Bills' },
-                        { i: '≡', l: 'More' },
-                      ].map((x, idx) => (
-                        <div key={idx} className="aspect-square bg-white/10 hover:bg-white/15 rounded-xl grid place-items-center cursor-pointer transition">
+                      {[{i:'↗',l:'Send'},{i:'⬇',l:'Deposit'},{i:'⌂',l:'Bills'},{i:'≡',l:'More'}].map((x, idx) => (
+                        <div key={idx} className="aspect-square bg-white/10 rounded-xl grid place-items-center">
                           <div className="text-center">
                             <p className="text-lg">{x.i}</p>
                             <p className="text-[8px] text-blue-200 mt-0.5">{x.l}</p>
@@ -421,8 +439,6 @@ export default function Login() {
                         </div>
                       ))}
                     </div>
-
-                    {/* Recent activity placeholder */}
                     <div className="flex justify-between items-center mb-3">
                       <p className="text-[10px] text-blue-200 uppercase tracking-[.2em]">Recent</p>
                       <p className="text-[10px] text-[#c9a227]">See all →</p>
@@ -440,8 +456,6 @@ export default function Login() {
                       </div>
                     ))}
                   </div>
-
-                  {/* Bottom nav */}
                   <div className="absolute bottom-0 left-0 right-0 bg-white/5 backdrop-blur border-t border-white/10 px-6 py-3 flex justify-around">
                     {['⌂','↗','📊','⚙'].map((i, x) => (
                       <span key={x} className={`text-lg ${x === 0 ? 'text-[#c9a227]' : 'text-blue-300'}`}>{i}</span>
@@ -449,8 +463,6 @@ export default function Login() {
                   </div>
                 </div>
               </div>
-
-              {/* Floating badge — generic */}
               <div className="absolute -right-6 top-24 bg-white rounded-xl shadow-2xl p-3 flex items-center gap-2 border border-gray-100">
                 <span className="w-9 h-9 rounded-full bg-green-50 grid place-items-center text-green-600 text-lg">✓</span>
                 <div className="text-xs">
@@ -458,8 +470,6 @@ export default function Login() {
                   <p className="text-gray-500">Just now</p>
                 </div>
               </div>
-
-              {/* Second floating badge — security */}
               <div className="absolute -left-8 bottom-32 bg-white rounded-xl shadow-2xl p-3 flex items-center gap-2 border border-gray-100">
                 <span className="w-9 h-9 rounded-full bg-blue-50 grid place-items-center text-blue-600 text-lg">🔒</span>
                 <div className="text-xs">
@@ -472,7 +482,6 @@ export default function Login() {
         </div>
       </section>
 
-      {/* TESTIMONIALS */}
       <section className="bg-[#f4f6fa] py-16">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-12">
@@ -480,7 +489,6 @@ export default function Login() {
             <h2 className="font-serif text-4xl text-[#0f2b5b] mb-3">What our customers say</h2>
             <p className="text-gray-500">Real people. Real banking. Real results.</p>
           </div>
-
           <div className="grid md:grid-cols-3 gap-8">
             {testimonials.map(t => (
               <div key={t.name} className="card p-7 bg-white">
@@ -501,7 +509,6 @@ export default function Login() {
         </div>
       </section>
 
-      {/* CTA */}
       <section className="bg-gradient-to-br from-[#0f2b5b] to-[#0a2148] text-white py-16">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2 className="font-serif text-4xl mb-4">Ready to get started?</h2>
@@ -515,7 +522,6 @@ export default function Login() {
         </div>
       </section>
 
-      {/* FOOTER */}
       <footer className="bg-[#0a1a3a] text-blue-200 py-10 text-sm">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -549,7 +555,6 @@ export default function Login() {
 
       <LiveChat />
 
-      {/* VIDEO MODAL */}
       {showVideo && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
              onClick={() => setShowVideo(false)}>

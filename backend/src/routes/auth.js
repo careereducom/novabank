@@ -7,7 +7,7 @@ const audit = require('../middleware/audit');
 const { sendOtpEmail } = require('../config/mailer');
 
 // ============================================================
-// STAGE 1 — Verify password, send OTP to email
+// STAGE 1 — Verify password, issue OTP
 // ============================================================
 router.post('/login',
   body('username').isLength({ min: 4, max: 32 }).trim().escape(),
@@ -27,6 +27,33 @@ router.post('/login',
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
+    // ── KYC / approval gate ──────────────────────────────────
+    if (user.approvalStatus === 'PENDING') {
+      return res.status(403).json({
+        error: 'ACCOUNT_PENDING',
+        message: 'Your application is under review. You will receive an access code by email once approved.',
+        status: 'PENDING',
+      });
+    }
+
+    if (user.approvalStatus === 'REJECTED') {
+      return res.status(403).json({
+        error: 'ACCOUNT_REJECTED',
+        message: user.rejectedReason
+          ? `Your application was declined: ${user.rejectedReason}`
+          : 'Your application was declined. Contact support for details.',
+        status: 'REJECTED',
+      });
+    }
+
+    if (user.approvalStatus !== 'ACTIVE') {
+      return res.status(403).json({
+        error: 'ACCOUNT_INACTIVE',
+        message: 'Your account is not active. Please contact support.',
+      });
+    }
+
+    // ── OTP generation ───────────────────────────────────────
     const otp = String(Math.floor(100000 + Math.random() * 900000));
     const expiry = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -155,14 +182,15 @@ router.post('/resend-otp', async (req, res) => {
     data: { loginOtp: otp, loginOtpExpiry: expiry }
   });
 
-    sendOtpEmail(process.env.DEMO_EMAIL || user.email, otp, user.fullName)
+  sendOtpEmail(process.env.DEMO_EMAIL || user.email, otp, user.fullName)
     .then(() => console.log('[OTP-RESEND] Sent to ' + user.email))
     .catch(err => console.error('[OTP-RESEND] Failed:', err.message));
 
   res.json({ success: true, message: 'A new code has been sent.' });
 });
+
 // ============================================================
-// Change transfer PIN
+// CHANGE TRANSFER PIN
 // ============================================================
 const auth = require('../middleware/auth');
 
@@ -180,13 +208,9 @@ router.post('/change-pin', auth, async (req, res) => {
       return res.status(400).json({ error: 'New PIN must be different from current' });
     }
 
-    // Find user's primary account
-    const account = await prisma.account.findFirst({
-      where: { userId: req.userId }
-    });
+    const account = await prisma.account.findFirst({ where: { userId: req.userId } });
     if (!account) return res.status(404).json({ error: 'No account found' });
 
-    // Verify current PIN (supports both bcrypt + legacy plaintext)
     let ok = false;
     if (account.transferCodeHash) {
       ok = await bcrypt.compare(currentPin, account.transferCodeHash);
@@ -207,7 +231,6 @@ router.post('/change-pin', auth, async (req, res) => {
       }
     });
 
-    // Audit log
     await prisma.auditLog.create({
       data: {
         action: 'PIN_CHANGE',
@@ -225,4 +248,60 @@ router.post('/change-pin', auth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ============================================================
+// ACTIVATE ACCOUNT — enter account number + access code
+// ============================================================
+router.post('/activate',
+  body('accountNumber').isLength({ min: 6, max: 17 }).trim().escape(),
+  body('accessCode').isLength({ min: 6, max: 6 }).trim(),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Invalid input' });
+
+    const { accountNumber, accessCode } = req.body;
+
+    const user = await prisma.user.findUnique({ where: { username: accountNumber } });
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+
+    if (user.approvalStatus === 'ACTIVE') {
+      return res.status(400).json({ error: 'Account already active. Please sign in.' });
+    }
+    if (user.approvalStatus === 'REJECTED') {
+      return res.status(403).json({ error: 'This application was declined.' });
+    }
+    if (user.approvalStatus !== 'APPROVED') {
+      return res.status(400).json({ error: 'Application not yet approved.' });
+    }
+
+    if (!user.accessCode || user.accessCode !== accessCode) {
+      return res.status(403).json({ error: 'Invalid access code.' });
+    }
+    if (!user.accessCodeExpiry || new Date() > user.accessCodeExpiry) {
+      return res.status(403).json({ error: 'Access code expired. Please contact support.' });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        approvalStatus: 'ACTIVE',
+        accessCode: null,
+        accessCodeExpiry: null,
+        kycStatus: 'VERIFIED',
+      }
+    });
+
+    // Unfreeze virtual card
+    await prisma.card.updateMany({
+      where: { userId: user.id },
+      data: { status: 'ACTIVE' }
+    });
+
+    res.json({
+      success: true,
+      message: 'Account activated successfully. You can now sign in.',
+    });
+  }
+);
+
 module.exports = router;

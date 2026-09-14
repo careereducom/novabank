@@ -148,44 +148,49 @@ export default function Signup() {
               </div>
             </div>
           )}
-
           {step === 4 && result && (
             <div className="space-y-6 text-center">
-              <div className="w-16 h-16 rounded-full bg-green-50 grid place-items-center mx-auto">
-                <span className="text-green-600 text-3xl">✓</span>
+              <div className="w-16 h-16 rounded-full bg-blue-50 grid place-items-center mx-auto">
+                <span className="text-blue-600 text-3xl">⏳</span>
               </div>
-              <h2 className="font-serif text-2xl text-[#0f2b5b]">Welcome to Continental Federal</h2>
-              <p className="text-gray-500 text-sm">Your account has been opened successfully.</p>
+              <h2 className="font-serif text-2xl text-[#0f2b5b]">Application Submitted</h2>
+              <p className="text-gray-500 text-sm leading-relaxed max-w-md mx-auto">
+                Thank you for opening an account with Continental Federal Bank &amp; Trust.
+                Your application is now <strong className="text-gray-700">under review</strong>.
+              </p>
 
-              <div className="bg-gray-50 rounded-lg p-5 text-left space-y-3 text-sm">
+              <div className="bg-gray-50 rounded-lg p-5 text-left space-y-3 text-sm max-w-md mx-auto">
                 <div className="flex justify-between">
                   <span className="text-gray-500">Account Number</span>
                   <span className="font-mono font-bold">{result.accountNumber}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Routing Number</span>
-                  <span className="font-mono font-bold">{result.routingNumber}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-500">Transfer Code</span>
-                  <span className="font-mono font-bold text-[#b1122b] text-lg tracking-widest">{result.transferCode}</span>
+                  <span className="text-gray-500">Status</span>
+                  <span className="font-bold text-amber-600">PENDING REVIEW</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Virtual Card</span>
-                  <span className="font-mono font-bold">•••• {result.cardLast4}</span>
+                  <span className="text-gray-500">Email</span>
+                  <span className="text-gray-700 text-xs truncate max-w-[200px]">{form.email}</span>
                 </div>
               </div>
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3 text-left">
-                ⚠ Save your transfer code — you'll need it to authorise every outbound payment.
-                A virtual card has been issued and is available immediately.
-              </p>
-              <button onClick={() => navigate('/login')} className="btn-primary w-full">
-                Sign In to Continue
+
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-4 text-left max-w-md mx-auto">
+                <p className="text-sm font-bold text-blue-900 mb-2">What happens next?</p>
+                <ol className="text-xs text-blue-800 space-y-1.5 list-decimal list-inside">
+                  <li>Our compliance team reviews your application (typically within 1 business day).</li>
+                  <li>Once approved, you'll receive a <strong>6-digit access code</strong> by email.</li>
+                  <li>Use your account number + access code to activate your account.</li>
+                </ol>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-left max-w-md mx-auto">
+                <p className="text-xs text-amber-900">
+                  ⚠ A welcome email has been sent to <strong>{form.email}</strong>. Please check your inbox (and spam folder).
+                </p>
+              </div>
+
+              <button onClick={() => navigate('/login')} className="btn-primary w-full max-w-md mx-auto">
+                Back to Sign In
               </button>
             </div>
           )}
-        </div>
-      </main>
-    </div>
-  );
-}
